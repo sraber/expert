@@ -1,4 +1,4 @@
-﻿-- functions.lua    Rev 58 11/15/18
+﻿-- functions.lua    Rev 59 11/26/18
 
 -- rev 58 fixed initialize to run without errors if no average data is present so new machines will normalize DY
 
@@ -23,6 +23,9 @@ function get_rec_rules() return l_rec_rules end
 
 function load_rulebase( filename )
   local ret = false
+  -- By definition, each rule base chunk puts a table called
+  -- _vds_rulebase that points to itself on the global variables list.
+  -- This is how we find it after loadfile is called.
   local chunk,msg = loadfile(filename)
   if chunk then
     chunk()
@@ -93,7 +96,6 @@ function do_rec_analysis( rec_table, rec_ex_table )
 end
 
 function final_processing()
-  recommendation_cleanup()
   debugprint( "final processing" )
 --  if g_debugprinting then  --  Added to speed processing  DAY
 --  writedata()
@@ -101,13 +103,15 @@ function final_processing()
 --  writefaults("a_Faults.txt",g_faults)
 --  writefaults("a_Recs.txt",g_recs)
 --end
+  if rulebase_final_processing then
+    rulebase_final_processing()
+  end
 
--- put a final processing call into rulebase.
--- How will this work when rulebase included directly?
--- Test for rulebase_final_processing if it exists call directly.
-
-  --g_peak_list=z_add_rules_to_peaklist(g_peak_list)
-  -- writefaults("a_FaultTones.txt",g_fault_tones)
+  for _, rb in pairs(rm_rulebase_info) do
+    if rb.lib.rulebase_final_processing then
+      rb.lib.rulebase_final_processing()
+    end
+  end
 end
 --------------------------------------------------------------------------
 
@@ -394,11 +398,13 @@ local function add_flag(flags,flag)
   end
   return flags
 end
+
 -- make_composite_peak_table
 -- Input:
 --    tdsi - An array of data set index.  
 --
 local function make_composite_peak_table( tdsi,aves )
+-- band width sort
   local function bw_sort( idx1, idx2 )
     return machine.datasets[idx1].bw < machine.datasets[idx2].bw
   end
@@ -419,7 +425,7 @@ local function make_composite_peak_table( tdsi,aves )
     -- data sets could be merged in, something along the lines of.. if there is a peak that is not too
     -- near an existing peak in the table, then add it.  But this can only be done based on Order, doing 
     -- it here, based on frequency (bin is equivilant to frequency in this regard) seems risky.
-    -- The if statement below insures we're not propcessing data of the same bin width.
+    -- The if statement below insures we're not processing data of the same bin width.
 
     if ds.bw > cbw then
       if ds.fmax > cfmax then
@@ -451,7 +457,7 @@ local function make_composite_peak_table( tdsi,aves )
               s=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , s )
               m=ds_spline_avg( ds, bin )
               m=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , m )
-              -- add amplitudes to average info to normal peaks
+              --[[ add amplitudes to average info to normal peaks
               local haveave=false
               local avebin,abin,pkamp,afmax,avedsi,aord, afreq,sev=0,0,0,0,0,0,0,0
               if ds.typ=='normal' and aves~=nil and #aves>0 then
@@ -492,18 +498,18 @@ local function make_composite_peak_table( tdsi,aves )
                     sev=(s-a)*(10^(s/40)/10^(110/40)) 
                   end 
                   table.insert( comp_peaks, {sbin=bin,sdsi=dsi,sfreq=freq,sord=ord,pk_index=idx,flags=flags,matches={},sval=s,mval=m,mdif=s-m ,mpct=((s-m)/m), sb_severity={} , sb_energy={} , harm_energy=0 , harm_severity=0 , sidebands={} , subharmonics={} , harm_pk_index={} , elsewhere={},fmax=ds.fmax,adsi=avedsi,aval=a,pct=((s-a)/a),dif=s-a ,aord=aord,afreq=afreq,order=round(ord,2),sev=sev})
-                else
+               -- else ]]
                   table.insert( comp_peaks, {sbin=bin,sdsi=dsi,sfreq=freq,sord=ord,pk_index=idx,flags=flags,matches={},sval=s,mval=m,mdif=s-m ,mpct=((s-m)/m), sb_severity={} , sb_energy={} , harm_energy=0 , harm_severity=0 , sidebands={} , subharmonics={} , harm_pk_index={} ,elsewhere={},fmax=ds.fmax ,order=round(ord,2)})
-                end
+              -- end 
 
-              else
-                table.insert( comp_peaks, {["sbin"]=bin,["sdsi"]=dsi,['sfreq']=freq,['sord']=ord,['pk_index']=idx,['sval']=s,['mval']=m,['mdif']=s-m,['mpct']=(s-m)/m,['order']=round(ord,2)})
+              --else
+              --table.insert( comp_peaks, {["sbin"]=bin,["sdsi"]=dsi,['sfreq']=freq,['sord']=ord,['pk_index']=idx,['sval']=s,['mval']=m,['mdif']=s-m,['mpct']=(s-m)/m,['order']=round(ord,2)})
+                end
               end
             end
           end
         end
-      end
-    end
+
   end
   return comp_peaks
 end
@@ -778,7 +784,7 @@ function initialize_data( norm )
   -----------------------------------------------------------------
   --data_quality()
   -----------------------------------------------------------------
-  local sr1xs=norm( sdgs )
+  local sr1xs=norm( sdgs ) -- normalize the data
 
   ------------------------------------------------------------------
   -- sdgs[element index]->[bin width]->[Timestamp]-> data index
@@ -831,10 +837,12 @@ function initialize_data( norm )
   end
 
   -- complete composite peak list with normalized info
-
+-- band width sort
+  local function bw_sort( idx1, idx2 )
+    return machine.datasets[idx1].bw < machine.datasets[idx2].bw
+  end
   for ei,e in ipairs(machine.elements) do 
     if e.data~=nil and e.data.spec~=nil and e.data.spec.cpl~=nil then
-
       -- determine element's component index
       local comp_index
       for ci, cmp in ipairs(machine.components) do 
@@ -857,7 +865,7 @@ function initialize_data( norm )
         table.insert(speeds,rat/g_comp_speed_ratio[comp_index])
       end
       local nspeeds=#speeds
-      -- Update sord and order in normal and demod peak lists      
+      -- Update sord and order in normal and demod peak lists, and add average info to normal peaks     
       for typ,axes in pairs(e.data.spec.cpl) do
         for ax, pl in pairs(axes) do
           for _,pk in ipairs(pl.peaks) do
@@ -866,7 +874,57 @@ function initialize_data( norm )
               pk.sord=pk.sfreq/machine.datasets[pk.sdsi].speed
               pk.order=round(pk.sord,2)
             end
-          end
+            -- add average amplitude info to  normal peaks
+            local aves=e.data.spec['average'][ax]
+            local s=pk.sval
+            local a
+            local haveave=false
+            local avebin,abin,pkamp,afmax,avedsi,aord, afreq,sev=0,0,0,0,0,0,0,0
+            if typ=='normal' and aves~=nil and #aves>0 then
+              table.sort( aves, bw_sort )
+              for m,ad in ipairs( aves ) do
+                if haveave then break end
+                local ads = machine.datasets[ad]
+                avebin=((pk.sord)/ads.bw+1)
+                if avebin>1 and avebin < #ads.data - g_bin_margin - 2 then
+                  local ads_speed=ads.speed
+                  afmax=ads.fmax
+                  a=ds_spline_value( ads, avebin )
+                  aord=(avebin-1)*ads.bw
+                  afreq=aord*ads.speed
+                  avedsi=ad 
+                  local bin_margin=g_bin_margin/ads.bw/100
+                  for bin=avebin-bin_margin,avebin+bin_margin, .1 do  
+                    haveave=true
+                    if bin>1 and bin<=#ads.data-1  then
+                      local aveamp=ds_spline_value( ads, bin )  -- spline amplitude
+                      if aveamp > pkamp  then 
+                        pkamp=aveamp
+                        avebin=bin
+                      end
+                    end
+                  end
+                  a=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , pkamp )
+                end
+
+                if haveave then
+                  if s>50 and s>a then 
+                    -- severity doubles or halves every +/-12 dB from 110 VdB 
+                    -- 110 VdB threshold is GSO spec which is really close to mil-std-167 and .1 in/sec industrial rule of thumb for ruff vibration
+                    sev=(s-a)*(10^(s/40)/10^(110/40)) 
+                  end
+                  pk.adsi=avedsi
+                  pk.aval=a
+                  pk.pct=((s-a)/a)
+                  pk.dif=s-a
+                  pk.aord=(avebin-1)*ads.bw
+                  pk.afreq=pk.aord*ads.speed
+                  pk.sev=sev
+                end
+              end
+
+            end
+          end -- pk
           local s,n=0,0
           if pl.shaftspeed~=nil then
             for ds,sp in pairs (pl.shaftspeed) do
@@ -1029,18 +1087,19 @@ function initialize_data( norm )
                   if isharm and sp*sbh/bw>3 and sm<10 and not (nextiscloser) and not(isshaftmult) and not(isspmult) then
                     pk.flags=add_flag(pk.flags,'u')
                     if pk.subharmonics==nil then
-                      pk['subharmonics']={order=round(sbh,2)..'sh'..round(sp,3),harm=m}
+                      pk['subharmonics']={suborder=tonumber(tostring(round(sbh,2))),shaftspeedratio=round(sp,3),mult=mm}
                     else
-                      table.insert(pk.subharmonics,{order=round(sbh,2)..'sh'..round(sp,3),harm=m})
+                      table.insert(pk.subharmonics,{suborder=tonumber(tostring(round(sbh,2))),shaftspeedratio=round(sp,3),mult=m})
                     end
                     table.insert(harms,pi)
                   end
                 end
                 if #harms>0 then
                   havesubs=true
-                  subharmonics[round(sbh,2)..'sh'..round(sp,3)..'x']=harms
-                end
+                  if subharmonics[tostring(round(sp,3))]==nil then subharmonics[tostring(round(sp,3))]={} end
+                  subharmonics[tostring(round(sp,3))][tostring(round(sbh,2))]=harms
                 harms={}
+                end
               end 
             end
           end
@@ -1229,6 +1288,7 @@ function initialize_data( norm )
                 end   
               end
             end
+
           end -- peak
 
           -- build sorted list of normal peak list items at the axis level
@@ -1607,211 +1667,358 @@ local function get_fault_rec_base( list, item, not_me, components_function )
 -- type       1-peak / 2-band / 3-fault
 
 -- Increment this value if the XML syntax or structure changes.
-  local infer_solution_version = '1'
+local infer_solution_version = '1'
 
 --===================
 -- These functions turn the hierarchy into XML
 --
 
-  local function asn_rulebase( t, w )
-    local str = '<rulebase '
-    str = str .. "name" .. '=\"' .. t.name .. '\" ' 
-    str = str .. "id" .. '=\"' .. t.id .. '\" '   
-    str = str .. "version" .. '=\"' .. t.version .. '\" ' 
-    str = str .. '/>'    
-    w.xml = w.xml .. str
-  end
+local function asn_rulebase( t, w )
+  local str = '<rulebase '
+  str = str .. "name" .. '=\"' .. t.name .. '\" ' 
+  str = str .. "id" .. '=\"' .. t.id .. '\" '   
+  str = str .. "version" .. '=\"' .. t.version .. '\" ' 
+  str = str .. '/>'    
+  w.xml = w.xml .. str
+end
 
-  local function asn_version( w )
-    local str = '<corelib '
-    str = str .. "name" .. '=\"' .. vds_core_name .. '\" ' 
-    str = str .. "id" .. '=\"' .. vds_core_id .. '\" '   
-    str = str .. "version" .. '=\"' .. vds_core_version .. '\" ' 
-    str = str .. '>'
-    local ls = {xml = str}
-    for _, t in ipairs(rm_rulebase_info) do
-      asn_rulebase( t, ls )
-    end
-    ls.xml = ls.xml .. '</corelib>'
-    w.xml = w.xml .. ls.xml
+local function asn_version( w )
+  local str = '<corelib '
+  str = str .. "name" .. '=\"' .. vds_core_name .. '\" ' 
+  str = str .. "id" .. '=\"' .. vds_core_id .. '\" '   
+  str = str .. "version" .. '=\"' .. vds_core_version .. '\" ' 
+  str = str .. '>'
+  local ls = {xml = str}
+  for _, t in ipairs(rm_rulebase_info) do
+    asn_rulebase( t, ls )
   end
+  ls.xml = ls.xml .. '</corelib>'
+  w.xml = w.xml .. ls.xml
+end
 
-  local function asn_band( lo, ho, t, w )
-    local str = '<band '
-    for att, val in pairs(t) do
-      if    att=='forcingorderindex' 
-      or att=='shaftdataindex' 
-      or att=='datasourceindex' 
-      or att=='dataindex' 
-      then
-        str = str .. att .. '=\"' ..  math.floor( val + 0.5 ) .. '\" ' 
-      else
-        str = str .. att .. '=\"' .. val .. '\" ' -- the space in last part is important.
-      end
-    end
-    str = str .. '/>'
-    w.xml = w.xml .. str
-  end
-
-  local function asn_peak( k, t, w )
-    local str = '<peak '
-    for att, val in pairs(t) do
-      if    att=='forcingorderindex' 
-      or att=='shaftdataindex' 
-      or att=='datasourceindex' 
-      or att=='dataindex' 
-      then
-        str = str .. att .. '=\"' ..  math.floor( val + 0.5 ) .. '\" ' 
-      else
-        str = str .. att .. '=\"' .. val .. '\" ' -- the space in last part is important.
-      end
-    end
-    str = str .. '/>'
-    w.xml = w.xml .. str
-  end
-
-  local function asn_xfault( k, t, w )
-    local str = '<xfault '
-    for att, val in pairs(t) do
+local function asn_band( lo, ho, t, w )
+  local str = '<band '
+  for att, val in pairs(t) do
+    if    att=='forcingorderindex' 
+    or att=='shaftdataindex' 
+    or att=='datasourceindex' 
+    or att=='dataindex' 
+    then
+      str = str .. att .. '=\"' ..  math.floor( val + 0.5 ) .. '\" ' 
+    else
       str = str .. att .. '=\"' .. val .. '\" ' -- the space in last part is important.
     end
-    str = str .. '/>'
-    w.xml = w.xml .. str
   end
+  str = str .. '/>'
+  w.xml = w.xml .. str
+end
 
-  local function asn_failed_rule_info( t, w )
-    local str = '<frule '
-    for att, val in pairs(t) do
-      local vt = type(val)
-      if vt=='number' or vt=='string' then
-        str = str .. att .. '=\"' .. val .. '\" ' -- the space in last part is important.
+local function asn_peak( k, t, w )
+  local str = '<peak '
+  for att, val in pairs(t) do
+    if    att=='forcingorderindex' 
+    or att=='shaftdataindex' 
+    or att=='datasourceindex' 
+    or att=='dataindex' 
+    then
+      str = str .. att .. '=\"' ..  math.floor( val + 0.5 ) .. '\" ' 
+    else
+      str = str .. att .. '=\"' .. val .. '\" ' -- the space in last part is important.
+    end
+  end
+  str = str .. '/>'
+  w.xml = w.xml .. str
+end
+
+local function asn_xfault( k, t, w )
+  local str = '<xfault '
+  for att, val in pairs(t) do
+    str = str .. att .. '=\"' .. val .. '\" ' -- the space in last part is important.
+  end
+  str = str .. '/>'
+  w.xml = w.xml .. str
+end
+
+local function asn_failed_rule_info( t, w )
+  local str = '<frule '
+  for att, val in pairs(t) do
+    local vt = type(val)
+    if vt=='number' or vt=='string' then
+      str = str .. att .. '=\"' .. val .. '\" ' -- the space in last part is important.
+    end
+  end
+  str = str .. '/>'
+  w.xml = w.xml .. str
+end
+
+local function asn_axis( k, t, w )
+  local ls = {xml='<axis val=\"'..k..'\">'}
+  if t.peaks then
+    for i,v in pairs(t.peaks) do
+      asn_peak(i,v,ls)   
+    end
+  end
+  if t.bands then
+    for lo,v in pairs(t.bands) do
+      for ho,bd in pairs(v) do
+        asn_band(lo,ho,bd,ls)
       end
     end
-    str = str .. '/>'
-    w.xml = w.xml .. str
   end
+  ls.xml = ls.xml .. '</axis>'
+  w.xml = w.xml .. ls.xml
+end
 
-  local function asn_axis( k, t, w )
-    local ls = {xml='<axis val=\"'..k..'\">'}
-    if t.peaks then
-      for i,v in pairs(t.peaks) do
-        asn_peak(i,v,ls)   
+local function asn_data( k, t, w )
+  local ls = {xml='<mel val=\"'..k..'\" guid=\"'.. machine.elements[k].guid ..'\" >' }
+  for i,v in pairs(t) do
+    asn_axis(i,v,ls)   
+  end
+  ls.xml = ls.xml .. '</mel>'
+  w.xml = w.xml .. ls.xml
+end
+
+local function asn_rule( k, t, w )
+  local ls = {xml='<rule guid=\"'..k..'\" name=\"'..t.name..'\" >'}
+  for i,v in pairs(t.data) do
+    asn_data(i,v,ls)
+  end
+  for i,v in pairs(t.faults) do
+    asn_xfault(i,v,ls)
+  end
+  ls.xml = ls.xml .. '</rule>'
+  w.xml = w.xml .. ls.xml
+end
+
+local function asn_fault( k, t, w )
+  local ls = {xml='<fault val=\"'..k..
+    '\" severity=\"'.. (t.severity or 'NAN')..
+    '\" conf=\"'..(t.conf or 'NAN')..'\" >' }
+  for i,v in pairs(t.data) do
+    asn_data(i,v,ls)
+  end
+  for i,v in pairs(t.rules) do
+    asn_rule(i,v,ls)
+  end
+  for i,v in pairs(t.faults) do
+    asn_xfault(i,v,ls)
+  end
+  ls.xml = ls.xml .. '</fault>'
+  w.xml = w.xml .. ls.xml
+end
+
+local function asn_failed_rules( k, w )
+  local ls = {xml = '<error>' }
+  local fr = g_infer_rules_failed[k]
+  for _,r in ipairs(fr) do
+    asn_failed_rule_info( r, ls )
+  end
+  ls.xml = ls.xml .. '</error>'
+  w.xml = w.xml .. ls.xml
+end
+
+local function asn_warn_rules( k, w )
+  local ls = {xml = '<warn>' }
+  local fr = g_infer_rules_warn[k]
+  for _,r in ipairs(fr) do
+    asn_failed_rule_info( r, ls )
+  end
+  ls.xml = ls.xml .. '</warn>'
+  w.xml = w.xml .. ls.xml
+end
+
+local function asn_rule_info(o, t, w )
+  local str = '<rule order'.. '=\"' .. o .. '\" '
+  for att, val in pairs(t) do
+    local vt = type(val)
+    if vt=='number' or vt=='string' then
+      str = str .. att .. '=\"' .. val .. '\" ' -- the space in last part is important.
+    end
+  end
+  str = str .. '/>'
+  w.xml = w.xml .. str
+end
+
+local function asn_fault_rule_map( k, t, w )
+  local ls = {xml = '<rmfault val=\"'..k..'\" >' }
+  for o,v in pairs(t) do
+    asn_rule_info(o,v,ls)
+  end
+  ls.xml = ls.xml .. '</rmfault>'
+  w.xml = w.xml .. ls.xml
+end
+
+local function asn_comp_rule_map( k, w )
+  if g_rule_map==nil then return end
+  local ls = {xml = '<rulemap>' }
+  local crm = g_rule_map[k]
+  if crm~=nil then
+    for f,r in pairs(crm) do
+      asn_fault_rule_map( f, r, ls )
+    end
+  end
+  ls.xml = ls.xml .. '</rulemap>'
+  w.xml = w.xml .. ls.xml
+end
+
+local function asn_comp( k, t, w )
+  local ls = {xml = '<comp val=\"'..k..'\">' }
+  asn_comp_rule_map( k, ls )
+  asn_failed_rules( k, ls )
+  asn_warn_rules( k, ls )
+  for i,v in pairs(t) do
+    asn_fault(i,v,ls)
+  end
+  ls.xml = ls.xml .. '</comp>'
+  w.xml = w.xml .. ls.xml
+end
+
+-- Input
+--    t - dataset
+local function asn_data_peaks( t, w)
+  local str = '<peaks>'
+    for i, b in ipairs(t) do
+      str = str .. '<peak indx=\"'..i..'\" bin=\"'..b..'\" /> '
+    end
+  str = str .. '</peaks>'
+  w.xml = w.xml .. str     
+end
+
+local function asn_data_matches( t, w)
+  local str = '<matches>'
+    for _, m in ipairs(t) do
+      str = str .. '<match bin=\"'..m.bin..'\" pos=\"'..m.pos..'\" tag=\"'..m.tag..'\" '..
+             'type=\"'..m.type..'\" '
+      if m.cn < 0 then
+        str = str .. 'cn=\"'..(-m.cn)..'\" en=\"\" /> '
+      else
+         str = str .. 'en=\"'..m.cn..'\" cn=\"\" /> '         
       end
     end
-    if t.bands then
-      for lo,v in pairs(t.bands) do
-        for ho,bd in pairs(v) do
-          asn_band(lo,ho,bd,ls)
-        end
+  str = str .. '</matches>'
+  w.xml = w.xml .. str     
+end
+
+local function asn_peak_matches( t, w)
+  local str = '<matches>'
+    for _, m in ipairs(t) do
+      str = str .. '<match tag=\"'..m.tag..'\" type=\"'..m.type..'\" '
+      if m.cn < 0 then
+        str = str .. 'cn=\"'..(-m.cn)..'\" en=\"\" /> '
+      else
+         str = str .. 'en=\"'..m.cn..'\" cn=\"\" /> '         
       end
     end
-    ls.xml = ls.xml .. '</axis>'
-    w.xml = w.xml .. ls.xml
-  end
+  str = str .. '</matches>'
+  w.xml = w.xml .. str     
+end
 
-  local function asn_data( k, t, w )
-    local ls = {xml='<mel val=\"'..k..'\" guid=\"'.. machine.elements[k].guid ..'\" >' }
-    for i,v in pairs(t) do
-      asn_axis(i,v,ls)   
-    end
-    ls.xml = ls.xml .. '</mel>'
-    w.xml = w.xml .. ls.xml
-  end
-
-  local function asn_rule( k, t, w )
-    local ls = {xml='<rule guid=\"'..k..'\" name=\"'..t.name..'\" >'}
-    for i,v in pairs(t.data) do
-      asn_data(i,v,ls)
-    end
-    for i,v in pairs(t.faults) do
-      asn_xfault(i,v,ls)
-    end
-    ls.xml = ls.xml .. '</rule>'
-    w.xml = w.xml .. ls.xml
-  end
-
-  local function asn_fault( k, t, w )
-    local ls = {xml='<fault val=\"'..k..
-      '\" severity=\"'.. (t.severity or 'NAN')..
-      '\" conf=\"'..(t.conf or 'NAN')..'\" >' }
-    for i,v in pairs(t.data) do
-      asn_data(i,v,ls)
-    end
-    for i,v in pairs(t.rules) do
-      asn_rule(i,v,ls)
-    end
-    for i,v in pairs(t.faults) do
-      asn_xfault(i,v,ls)
-    end
-    ls.xml = ls.xml .. '</fault>'
-    w.xml = w.xml .. ls.xml
-  end
-
-  local function asn_failed_rules( k, w )
-    local ls = {xml = '<error>' }
-    local fr = g_infer_rules_failed[k]
-    for _,r in ipairs(fr) do
-      asn_failed_rule_info( r, ls )
-    end
-    ls.xml = ls.xml .. '</error>'
-    w.xml = w.xml .. ls.xml
-  end
-
-  local function asn_warn_rules( k, w )
-    local ls = {xml = '<warn>' }
-    local fr = g_infer_rules_warn[k]
-    for _,r in ipairs(fr) do
-      asn_failed_rule_info( r, ls )
-    end
-    ls.xml = ls.xml .. '</warn>'
-    w.xml = w.xml .. ls.xml
-  end
-
-  local function asn_rule_info(o, t, w )
-    local str = '<rule order'.. '=\"' .. o .. '\" '
-    for att, val in pairs(t) do
-      local vt = type(val)
-      if vt=='number' or vt=='string' then
-        str = str .. att .. '=\"' .. val .. '\" ' -- the space in last part is important.
+local function asn_cpl_peak( t, w )
+  local ls = {xml = '<peak ' }
+  for att, val in pairs(t) do
+    if (type(val) ~= "table") then
+      if att=='adsi' 
+      or att=='sdsi' 
+      then
+        ls.xml = ls.xml .. att .. '=\"' ..  math.floor( val + 0.5 ) .. '\" ' 
+      else
+        ls.xml = ls.xml .. att .. '=\"' .. val .. '\" ' -- the space in last part is important.
       end
     end
-    str = str .. '/>'
-    w.xml = w.xml .. str
   end
+  ls.xml = ls.xml .. '>'
+  if t.matches then
+    asn_peak_matches( t.matches, ls )
+  end
+  ls.xml = ls.xml .. '</peak>'
+  w.xml = w.xml .. ls.xml
+end
 
-  local function asn_fault_rule_map( k, t, w )
-    local ls = {xml = '<rmfault val=\"'..k..'\" >' }
-    for o,v in pairs(t) do
-      asn_rule_info(o,v,ls)
+local function asn_cpl_axis( k, t, w )
+  local ls = {xml='<axis val=\"'..k..'\">'}
+  for _, pk in pairs(t.peaks) do
+    asn_cpl_peak(pk, ls)      
+  end 
+  ls.xml = ls.xml .. '</axis>'
+  w.xml = w.xml .. ls.xml
+end
+
+local function asn_cpl_domain( k, t, w )
+  local ls = {xml = '<'..k..'>' }
+  for ax, cpla in pairs(t) do
+    asn_cpl_axis(ax, cpla, ls)      
+  end  
+  ls.xml = ls.xml .. '</'..k..'>'
+  w.xml = w.xml .. ls.xml    
+end
+
+-- Input:
+--   k -  spectrum type (demod, average, normal)
+--   t - element.spec[axis]
+local function asn_spec_type( k, t, w )
+  local ls = {xml = '<'..k..'>' }
+  local record = {}
+  local rsup = {}
+  for ax,tdsi in pairs(t) do -- this will be r, a, t = {indexs }
+    for _,dsi in ipairs(tdsi) do
+      local ds = machine.datasets[dsi]
+      local rec = record[ds.sid]
+      if rec==nil then rec={}; record[ds.sid] = rec; rsup[ds.sid] = {speed=ds.speed, fmax=ds.fmax} end
+      rec[ax] = ds
     end
-    ls.xml = ls.xml .. '</rmfault>'
-    w.xml = w.xml .. ls.xml
   end
-
-  local function asn_comp_rule_map( k, w )
-    if g_rule_map==nil then return end
-    local ls = {xml = '<rulemap>' }
-    local crm = g_rule_map[k]
-    if crm~=nil then
-      for f,r in pairs(crm) do
-        asn_fault_rule_map( f, r, ls )
+  for sid, rec in pairs(record) do
+    -- use sid and rsup[sid] to make record tag
+    ls.xml = ls.xml .. '<record sid=\"'..sid..'\" speed=\"'..rsup[sid].speed..'\" fmax=\"'..rsup[sid].fmax..'\">'
+    for ax, ds in pairs(rec) do
+      ls.xml = ls.xml .. '<axis val=\"'..ax..'\">'
+      asn_data_peaks(ds.peaks, ls)
+      if ds.matches then
+        asn_data_matches(ds.matches, ls)
       end
+      ls.xml = ls.xml .. '</axis>'       
     end
-    ls.xml = ls.xml .. '</rulemap>'
-    w.xml = w.xml .. ls.xml
+    ls.xml = ls.xml .. '</record>' 
   end
+  ls.xml = ls.xml .. '</'..k..'>'
+  w.xml = w.xml .. ls.xml    
+end
 
-  local function asn_comp( k, t, w )
-    local ls = {xml = '<comp val=\"'..k..'\">' }
-    asn_comp_rule_map( k, ls )
-    asn_failed_rules( k, ls )
-    asn_warn_rules( k, ls )
-    for i,v in pairs(t) do
-      asn_fault(i,v,ls)
-    end
-    ls.xml = ls.xml .. '</comp>'
-    w.xml = w.xml .. ls.xml
+-- Input:
+--   k -  spectrum type (demod, average, normal)
+--   t - element.spec.cpl
+local function asn_cpl_type( t, w )
+  local ls = {xml = '<CPL>' }
+  for key, val in pairs(t) do
+    asn_cpl_domain( key, val, ls )
   end
+  ls.xml = ls.xml .. '</CPL>'
+  w.xml = w.xml .. ls.xml    
+end
+
+local function asn_element( k, t, w )
+  local ls = {xml = '<mel val=\"'..k..'\" guid=\"'..t.guid..'\" ratio=\"'..t.speedratio..'\" >' }  
+  for key, val in pairs(t.data.spec) do
+    if key=="cpl" then
+      asn_cpl_type( val, ls )
+    elseif key=="demod" or key=="average" or key=="normal" then
+      asn_spec_type( key, val, ls )
+    end
+  end
+  ls.xml = ls.xml .. '</mel>'
+  w.xml = w.xml .. ls.xml
+end
+
+local function asn_peaklist( w )
+  local ls = {xml = '<pickups>' }
+  for key,ele in ipairs(machine.elements) do
+    if ele.data~=nil and ele.data.spec~=nil then
+      asn_element( key, ele, ls )
+    end
+  end
+  ls.xml = ls.xml .. '</pickups>'
+  w.xml = w.xml .. ls.xml    
+end
 
 --  End infer solution XML output code
 --===================
@@ -1842,7 +2049,7 @@ local function get_fault_rec_base( list, item, not_me, components_function )
       local r = g_infer_rules_passed[cn]
       if f~=nil then
         for fg,val in pairs(f) do
-          ft = as_get_fault_table( cn, fg )
+          local ft = as_get_fault_table( cn, fg )
           ft.conf = val.conf
           ft.severity = val.severity
           for _,rval in ipairs(r) do
@@ -1947,7 +2154,10 @@ local function get_fault_rec_base( list, item, not_me, components_function )
   end
 -- this function return the text from the string table associated with the guid
   function guid_name(guid)
-    return guidnames[guid] or guid
+    if guidnames then
+      return guidnames[guid] or guid
+    end
+    return guid
   end
 
   function assert_support( support )
@@ -1973,11 +2183,9 @@ local function get_fault_rec_base( list, item, not_me, components_function )
     for n, t in pairs(g_infer_solution) do
       asn_comp( n, t, w )
     end
-    -- REVIEW: Replace with a function to generate xml for the peak list
-    --         based on the new peak list.
-    local pl = z_format_peak_list_to_xml(g_peak_list)
-    w.xml = w.xml .. pl .. '</root>'
-    -- w.xml = w.xml .. '</root>'
+    asn_peaklist( w )
+
+    w.xml = w.xml .. '</root>'
     return w.xml
   end
 
@@ -2402,12 +2610,8 @@ local function get_fault_rec_base( list, item, not_me, components_function )
   function find_order_info( order, shaft_data_index, typ, axis, no_error )
     local dsi, ds, helper = get_best_dataset(order, shaft_data_index, typ, axis, no_error)
     if ds==nil then return nil end
-    local bin, lbin, hbin = helper.bin(order, ds)
-
-    --local found,pos = find_bin_in_peaks( bin, ds.peaks, g_peak_margin )
-    --if found==false then return {["found"]=false} end
-    --bin = ds.peaks[pos]
-    local bin = find_peak_in_range( bin, g_peak_margin, ds.peaks )
+    local seed_bin, lbin, hbin = helper.bin(order, ds)
+    local bin = find_peak_in_range( seed_bin, g_peak_margin, ds.peaks )
     if bin==0 then return {["found"]=false} end
 
     local ord = helper.order(bin, ds)
@@ -3014,11 +3218,10 @@ local function get_fault_rec_base( list, item, not_me, components_function )
     polish_avg_peak = polish_avg_peak or (true)
     local r1 = find_tag_info( tag, shaft_tag_index, shaft_data_index, axis, composite_shaft_index )
     if r1.found==false then return { ["found"]=false } end
-    -- last parameter means peak polish wanted
-    --local r2 = find_order_info( r1.order, shaft_data_index, "average", axis, no_error )
-    --if r2.found==false then
-    r2 = get_order_info( r1.order, shaft_data_index, "average", axis, polish_avg_peak ) 
-    --end
+    local r2 = find_order_info( r1.order, shaft_data_index, "average", axis )
+    if r2.found==false then
+      r2 = get_order_info( r1.order, shaft_data_index, "average", axis, polish_avg_peak ) 
+    end
 
     local s = r1.value
     local m = r1.mval
@@ -3411,8 +3614,8 @@ local function get_fault_rec_base( list, item, not_me, components_function )
     elseif strtag=='1X' then
       local max_order = 0 
       local ret_matches,result = {},{}        
+      local speed=compspeedrat/shaftspeed
       if pl.harmonics~=nil and pl.harmonics[tostring(round(speed,3))]~= nil then    
-        local speed=compspeedrat/shaftspeed
         local harms=pl.harmonics[tostring(round(speed,3))]
         if harms~=nil then
           if #harms>0 then 
@@ -3475,8 +3678,8 @@ local function get_fault_rec_base( list, item, not_me, components_function )
     if true then
       local bearing,alias,spdratio =z_get_brg_and_data_set_speed_ratio(element,brg)
       local pk=machine.elements[alias].data.spec.cpl.normal[axis].peaks[pk_index]
-      if pk.elsewhere[key][key]==nil then return false,0  end
-      for _,ax in ipairs(pk.elsewhere[key][key]) do
+      if pk.elsewhere[key]==nil then return false,0  end
+      for _,ax in ipairs(pk.elsewhere[key]) do
         if ax.mi~=alias and ax.axis==axis and pk.sval<=ax.sval-ct_limit then return true,ax.mi end
       end
     end
@@ -3634,17 +3837,18 @@ local function get_fault_rec_base( list, item, not_me, components_function )
                     end
                   end
                 end 
-                if #svalue>0 then
-                  if ew[key]~=nil then ew[key]={} end
-                  ew[key]=svalue
+                --if #svalue>0 then
+                --if ew[key]~=nil then ew[key]={} end
+                -- ew[key]=svalue
+                --end
                 end
               end
             end
           end
         end
       end
-    end
-    return ew
+    --return ew
+    return svalue
   end 
 
 -- binary search for keys (sord or sfreq) in .peaks of peaklist returns an index delta percent below target

@@ -60,6 +60,11 @@ function recommendation_cleanup()
   end
 end
 
+function  rulebase_final_processing()
+  debugprint( "CVAT final_processing called" )
+  recommendation_cleanup()
+end
+
 
 
 
