@@ -1,6 +1,5 @@
 ﻿-- functions.lua    Rev 59 11/26/18
 
--- rev 58 fixed initialize to run without errors if no average data is present so new machines will normalize DY
 
 --------------------------------------------------------------------------
 --  ***************    Rule Managment  ***********************

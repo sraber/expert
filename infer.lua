@@ -1,4 +1,4 @@
--- infer.lua    Rev 8     9/14/18
+-- infer.lua    Rev 9     11/28/18
 
 -- This provides a default engineering unit for a rule.  This is
 -- not the desired way to define the rule unit.  It should be defined 
@@ -158,8 +158,7 @@ function infer( do_analysis )
   g_infer_rules_warn = shaft_rules_warn
   g_rule_map = {}
   g_rule_map_order = 1
-
-  local rules = do_analysis( shaft_faults, infer_solution )
+  
   ---------------------------------------------------------
   -- Initialize some arrays
   -- cn   = component number
@@ -182,6 +181,8 @@ function infer( do_analysis )
     end
   end
   -------------------------------------------------------
+  
+  local rules = do_analysis( shaft_faults, infer_solution )
   
   -- *******************************************************
   --      Embedded Function
