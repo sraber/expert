@@ -1,5 +1,6 @@
-﻿-- functions.lua    Rev 59 11/26/18
+﻿-- functions.lua    Rev 60 11/28/18
 
+-- rev 58 fixed initialize to run without errors if no average data is present so new machines will normalize DY
 
 --------------------------------------------------------------------------
 --  ***************    Rule Managment  ***********************
@@ -60,6 +61,8 @@ function do_fault_analysis( fault_table, fault_ex_table )
       ft[fg] = fd
     end
   end
+  
+
   --
 
   -- This  will only be called here in the do_fault_analysis function.  We want 
@@ -781,9 +784,12 @@ function initialize_data( norm )
   end
 
   -----------------------------------------------------------------
-  --data_quality()
+  local dq_warnings=data_quality()
   -----------------------------------------------------------------
   local sr1xs=norm( sdgs ) -- normalize the data
+  ------------------------------------------------------------------
+  dq_warnings=normalization_quality(dq_warnings)
+    ------------------------------------------------------------------
 
   ------------------------------------------------------------------
   -- sdgs[element index]->[bin width]->[Timestamp]-> data index

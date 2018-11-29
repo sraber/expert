@@ -164,7 +164,7 @@ function infer( do_analysis )
   -- cn   = component number
   -- comp = component
 
-  for cn,comp in pairs(machine.components) do
+  for cn,_ in pairs(machine.components) do
     shaft_rules_passed[cn]={}
     shaft_rules_failed[cn]={}
     shaft_rules_warn[cn]={}
@@ -173,6 +173,12 @@ function infer( do_analysis )
     infer_solution[cn]={}
     parent_faults[cn]={}
     g_shaft_store[cn]={}
+  end
+  -------------------------------------------------------
+  
+  local rules = do_analysis( shaft_faults, infer_solution )
+    
+  for _,comp in pairs(machine.components) do
     -- Scan for maximum priority rule
     for _,r in pairs(rules) do
       if r.shaft==comp.shaft then
@@ -180,10 +186,7 @@ function infer( do_analysis )
       end
     end
   end
-  -------------------------------------------------------
-  
-  local rules = do_analysis( shaft_faults, infer_solution )
-  
+
   -- *******************************************************
   --      Embedded Function
   local function get_super_shaft_for_component( comp_number )
