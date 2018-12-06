@@ -52,19 +52,20 @@ function z_forcingfrequencyfundamental(strtag,element,brg,straxis,strrotorname,t
   z_countuniquecalls(strtag,element,brg,straxis)
   local sbt=string.upper(strtag)  
   local lf=string.match(sbt,'LF')=='LF'
-  local rF1x=analyze_by_tag( "1X", element, brg, straxis )  -- check for valid data
+  --local rF1x=analyze_by_tag( "1X", element, brg, straxis )  -- check for valid data
+  local sr1x = get_data_shaft_speed( brg, straxis )
   increment_store_counter( "pt"..element..strtag ) -- count the times data is found
   --local ordr1x=rF1x.sord or 1 
-  local sr1x=rF1x.sfreq 
+  --local sr1x=rF1x.sfreq 
   local _,alias,spdratio =z_get_brg_and_data_set_speed_ratio(element,brg)
-  if sr1x==nil then
-    for _,ds in ipairs (machine.datasets)  do
-      if ds.dom=='spec' and ds.typ=='normal' and ds.axis==straxis and ds.mi==alias then
-        sr1x=ds.speed*spdratio -- use the dataset speed when 1X is not present
-        break
-      end
-    end 
-  end
+  --if sr1x==nil then
+  --  for _,ds in ipairs (machine.datasets)  do
+  --    if ds.dom=='spec' and ds.typ=='normal' and ds.axis==straxis and ds.mi==alias then
+  --      sr1x=ds.speed*spdratio -- use the dataset speed when 1X is not present
+  --      break
+  --    end
+  --  end 
+  --end
   local taghz
   local rFff={}
   local tagord
@@ -251,7 +252,9 @@ function z_forcingfrequencyharmonics(strtag,element,brg,straxis,howmany,strrotor
       local peakistag,x,frac= z_is_a_multiple(tagord,fford,.01 )
       peakistag=peakistag and x==1
       if  peakistag  then
-        local rHff=get_harmonic_groups_from_cpl(element,brg,straxis,strtag)--analyze_harmonic_by_tag( strtag, element, brg, straxis )
+        -- REVIEW: Experimental replacement... needs evaluation
+        --local rHff=get_harmonic_groups_from_cpl(element,brg,straxis,strtag)--analyze_harmonic_by_tag( strtag, element, brg, straxis )
+        local rHff=analyze_harmonic_by_tag_cpl(strtag,element,brg,straxis)
         if rHff.found then
           for _,mtch in ipairs(rHff.matches) do
             --stoppoint(strtag,'1X')
@@ -1004,7 +1007,9 @@ function rotorlooseness(element,brg,straxis,strrotorname,threshold,svrtymult) --
     if rn=='PUMP' then
       local _
     end 
-    local rFLoos=get_harmonic_groups_from_cpl(element,brg,straxis,'1X')
+    -- REVIEW: Experimental.. needs eval
+    --local rFLoos=get_harmonic_groups_from_cpl(element,brg,straxis,'1X')
+    local rFLoos=analyze_harmonic_by_tag_cpl('1X',element,brg,straxis)
     --local rFLoos=z_get_harmonic_groups_from_peak_list(element,brg,straxis,'1X')-- analyze_harmonic_by_tag( "1X", element, brg, straxis )
     if rFLoos.found then 
       local mxorders=rFLoos.orders 
@@ -1193,7 +1198,9 @@ function z_get123orders(strtag,element,brg,straxis) --  This function gets the d
   local ord3bin=0
   local ord3dsi=0
   --local r1XH = analyze_harmonic_by_tag( strtag, element, brg, straxis) 
-  local rFHarm=get_harmonic_groups_from_cpl(element,brg,straxis,strtag) --analyze_harmonic_by_tag( , element, brg, straxis )
+  -- REVIEW: Experimental.. needs eval
+  --local rFHarm=get_harmonic_groups_from_cpl(element,brg,straxis,strtag) --analyze_harmonic_by_tag( , element, brg, straxis )
+  local rFHarm=analyze_harmonic_by_tag_cpl(strtag,element,brg,straxis)
   if rFHarm.found == true then 
     local set=false
     for i,match in ipairs(rFHarm.matches) do
@@ -3300,8 +3307,9 @@ function bearingREtones(element,brg,straxis,strrotorname,threshold,svrtymult) --
   -- Determine if there are harmonics that are not integer multiple of a shaft rate and do not have forcing frequency matches
   --
   --local harms=z_get_harmonic_groups_from_peak_list(element,brg,straxis,nil,true)
-  local harms=get_harmonic_groups_from_cpl(element,brg,straxis,nil,true)
-
+  --local harms=get_harmonic_groups_from_cpl(element,brg,straxis,nil,true)
+  local harms=get_harmonics(brg,straxis,true)
+  
   if harms.found then
     local brgharmidx={}
     local identified=false

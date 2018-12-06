@@ -1,4 +1,4 @@
--- shaft.lua    Rev 8     7/26/18
+-- shaft.lua    Rev 9     12/6/18
 
 -------------------------------------------------------------------
 --             Speed Walking algorithm
@@ -24,7 +24,7 @@ local function remove_value_from_array (tab, val)
   end
 end
 
-local function find_super_shaft_with_element( sups, ei )
+function find_super_shaft_with_element( sups, ei )
   for i,ss in ipairs(sups) do
     if ss.elements[ei] then
       return i
@@ -33,7 +33,7 @@ local function find_super_shaft_with_element( sups, ei )
   return 0
 end
 
-local function find_super_shaft_with_component( sups, comp_number )
+function find_super_shaft_with_component( sups, comp_number )
   for i,ss in ipairs(sups) do
     if ss.components[comp_number] then
       return i
@@ -106,6 +106,13 @@ end
 --    ci   - machine component of designated speed
 --    cs   - speed of ci
 --
+-- Return:
+--   A table if super shaft speeds.  Format speeds[super_shaft_index] = speed
+--
+-- Side affect:
+--   The speed table is used to place a speed ratio value into each
+--    super shaft table.
+--
 function compute_super_shaft_speeds( sups, ci, cs  )
   local speeds={}
   local suplist={}
@@ -119,6 +126,10 @@ function compute_super_shaft_speeds( sups, ci, cs  )
     find_super_shaft_speeds( sups, cs, ssi, suplist, speeds )
   else
     error("The value for element index does not exist in any super shaft")
+  end
+  
+  for ssi,ss in ipairs(sups) do
+    ss.speed_ratio = speeds[ssi]/machine.speed
   end
   
   return speeds
@@ -170,10 +181,13 @@ end
 --
 -- Input:
 --    components : An array of component numbers.
---
+--    e2c: a map of element to table of component numbers it intersects.
 -- Return:
---   A super shaft table.  It has two nested tables:
---      components, elements
+--   A super shaft table with the following entries:
+--      components
+--      elements
+--      e_to_c
+--      c_to_c
 --
 -- Error: 
 --

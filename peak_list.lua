@@ -1,4 +1,4 @@
--- peak_list.lua   rev 10  11/2/2018
+-- peak_list.lua   rev 11  12/6/2018
 --
 
 function reduced_peak_list()
@@ -839,7 +839,7 @@ end
 --
 function find_peak_in_peaklist(element,brg,straxis,bin)
   local m,p
-  local brgmi,aliasmi,_=z_get_brg_and_data_set_speed_ratio(element,brg)
+  local aliasmi = get_element_alias(brg)
   --old peak list
   for i,mia in ipairs(g_peak_list) do
     if mia.mi==aliasmi and mia.axis==straxis then
@@ -856,48 +856,6 @@ function find_peak_in_peaklist(element,brg,straxis,bin)
   ::out::
   return {found=true, mia=m, pk_index=p}
 end
-
--- REVIEW: 11/9/18 - This function is slated for removal.
---                   If this comment is still here in a month or a year
---                   It time to remove this code.
---function z_add_rules_to_peaklist(peak_list)
---  local rule={}
---  local flags
---  for i,mia in ipairs(peak_list) do
---    for p,pk in ipairs(mia.peaks) do
---      flags=pk.flags or '-'
---      rule={}
---      for r,ft in ipairs(g_fault_tones) do
---        if ft.axis==mia.axis and ft.data_mi==mia.mi then
---          if ft.sbin~=nil then 
---            if round(ft.sbin/pk.sbin,4)==1 then
---              table.insert(rule,ft)
---              g_fault_tones[r].pk_index=p
---              g_fault_tones[r].orderlow=pk.sord
---            end
---          end
---        end
---      end
---      local rls=peak_list[i].peaks[p].rules
---      if rls==nil then
---        peak_list[i].peaks[p].rules=rule
---      else
---        local nrl=#rls
---        for j,rl in ipairs(rule) do
---          peak_list[i].peaks[p].rules[nrl+j]=rl
---        end
---      end
---      if #rule>0 then
---        peak_list[i].peaks[p].flags=add_flag(flags,'r')
-
---      end
---    end
---  end
---  g_fault_tones_xml =z_format_fault_tones_to_xml(g_fault_tones)
---  g_peak_list_xml= z_format_peak_list_to_xml(g_peak_list)
---  return peak_list
---end
---
 
 function z_get_harmonic_groups_from_peak_list(element,brg,axis,strtag,remove_matches,sev_th,nr)
   remove_matches=remove_matches or false

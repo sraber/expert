@@ -1,4 +1,4 @@
-﻿-- functions.lua    Rev 60 11/28/18
+﻿-- functions.lua    Rev 61 12/6/18
 
 -- rev 58 fixed initialize to run without errors if no average data is present so new machines will normalize DY
 
@@ -232,6 +232,10 @@ function get_this_comp_number()
   return g_shaft_number
 end
 
+function get_this_super_shaft()
+  return machine.supershafts[g_super_shaft_number]
+end
+
 function get_comp_speed_ratios()
   return g_comp_speed_ratio
 end
@@ -456,62 +460,15 @@ local function make_composite_peak_table( tdsi,aves )
             if bin >= min_bin then
               idx=idx+1
               s=ds_spline_value( ds, bin )
-              s=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , s )
+              --s=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , s )
               m=ds_spline_avg( ds, bin )
-              m=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , m )
-              --[[ add amplitudes to average info to normal peaks
-              local haveave=false
-              local avebin,abin,pkamp,afmax,avedsi,aord, afreq,sev=0,0,0,0,0,0,0,0
-              if ds.typ=='normal' and aves~=nil and #aves>0 then
-                table.sort( aves, bw_sort )
-                for m,ad in ipairs( aves ) do
-                  if haveave then break end
-                  local ads = machine.datasets[ad]
-                  avebin=((ord)/ads.bw+1)
-                  if avebin>1 and avebin < #ads.data - g_bin_margin - 2 then
-                    local ads_speed=ads.speed
-                    afmax=ads.fmax
-                    a=ds_spline_value( ads, avebin )
-                    aord=(avebin-1)*ads.bw
-                    afreq=aord*ads.speed
-                    avedsi=ad 
-                    local bin_margin=g_bin_margin/ads.bw/100
-                    for bb=avebin-bin_margin,avebin+bin_margin, bin_margin/10 do  
-                      if bb>1 and bb<=#ads.data-1  then
-                        a=ds_spline_value( ads, bb )  -- spline amplitude
-                      end
-                      if a~=nil then 
-                        if a > pkamp then
-                          haveave=true
-                          pkamp=a
-                          abin=bb
-                          aord=(abin-1)*ads.bw
-                          afreq=aord*ads.speed
-                        end
-                      end
-                    end
-                    a=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , pkamp )
-                  end
-                end
-                if haveave then
-                  if s>50 and s>a then 
-                    -- severity doubles or halves every +/-12 dB from 110 VdB 
-                    -- 110 VdB threshold is GSO spec which is really close to mil-std-167 and .1 in/sec industrial rule of thumb for ruff 
-                    sev=(s-a)*(10^(s/40)/10^(110/40)) 
-                  end 
-                  table.insert( comp_peaks, {sbin=bin,sdsi=dsi,sfreq=freq,sord=ord,pk_index=idx,flags=flags,matches={},sval=s,mval=m,mdif=s-m ,mpct=((s-m)/m), sb_severity={} , sb_energy={} , harm_energy=0 , harm_severity=0 , sidebands={} , subharmonics={} , harm_pk_index={} , elsewhere={},fmax=ds.fmax,adsi=avedsi,aval=a,pct=((s-a)/a),dif=s-a ,aord=aord,afreq=afreq,order=round(ord,2),sev=sev})
-               -- else ]]
+              --m=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , m )
                   table.insert( comp_peaks, {sbin=bin,sdsi=dsi,sfreq=freq,sord=ord,pk_index=idx,flags=flags,matches={},sval=s,mval=m,mdif=s-m ,mpct=((s-m)/m), sb_severity={} , sb_energy={} , harm_energy=0 , harm_severity=0 , sidebands={} , subharmonics={} , harm_pk_index={} ,elsewhere={},fmax=ds.fmax ,order=round(ord,2)})
-              -- end 
-
-              --else
-              --table.insert( comp_peaks, {["sbin"]=bin,["sdsi"]=dsi,['sfreq']=freq,['sord']=ord,['pk_index']=idx,['sval']=s,['mval']=m,['mdif']=s-m,['mpct']=(s-m)/m,['order']=round(ord,2)})
                 end
               end
             end
           end
         end
-
   end
   return comp_peaks
 end
@@ -521,13 +478,11 @@ local function ComputeTimeSignalCharacteristics( data )
   local n = #data
   local dn = 1/n
   local peak = -1
-
   for _,v in ipairs(data) do
     rms = rms + dn*v*v
     local a = math.abs(v)
     if a > peak then peak = a end
   end
-
   rms = math.sqrt( rms )
   local csf = peak / rms
   return rms, csf
@@ -777,7 +732,6 @@ function initialize_data( norm )
           end
         end
         composites_table[typ] = typ_table
-
       end
       e.data.spec["cpl"] = composites_table
     end
@@ -841,11 +795,12 @@ function initialize_data( norm )
     end
   end
 
-  -- complete composite peak list with normalized info
 -- band width sort
   local function bw_sort( idx1, idx2 )
     return machine.datasets[idx1].bw < machine.datasets[idx2].bw
   end
+
+  -- complete composite peak list with normalized info
   for ei,e in ipairs(machine.elements) do 
     if e.data~=nil and e.data.spec~=nil and e.data.spec.cpl~=nil then
       -- determine element's component index
@@ -870,6 +825,7 @@ function initialize_data( norm )
         table.insert(speeds,rat/g_comp_speed_ratio[comp_index])
       end
       local nspeeds=#speeds
+
       -- Update sord and order in normal and demod peak lists, and add average info to normal peaks     
       for typ,axes in pairs(e.data.spec.cpl) do
         for ax, pl in pairs(axes) do
@@ -879,6 +835,7 @@ function initialize_data( norm )
               pk.sord=pk.sfreq/machine.datasets[pk.sdsi].speed
               pk.order=round(pk.sord,2)
             end
+
             -- add average amplitude info to  normal peaks
             local aves=e.data.spec['average'][ax]
             local s=pk.sval
@@ -909,14 +866,16 @@ function initialize_data( norm )
                       end
                     end
                   end
-                  a=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , pkamp )
+                  a=pkamp ---ConvertSpectrum( g_internal_unit  , Unit.U_VDB , pkamp )
                 end
 
                 if haveave then
-                  if s>50 and s>a then 
+                  local sdb=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , s )
+                  local adb=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , a )
+                  if sdb>50 and sdb>adb then 
                     -- severity doubles or halves every +/-12 dB from 110 VdB 
                     -- 110 VdB threshold is GSO spec which is really close to mil-std-167 and .1 in/sec industrial rule of thumb for ruff vibration
-                    sev=(s-a)*(10^(s/40)/10^(110/40)) 
+                    sev=(sdb-adb)*(10^(sdb/40)/10^(110/40)) 
                   end
                   pk.adsi=avedsi
                   pk.aval=a
@@ -927,7 +886,6 @@ function initialize_data( norm )
                   pk.sev=sev
                 end
               end
-
             end
           end -- pk
           local s,n=0,0
@@ -989,7 +947,7 @@ function initialize_data( norm )
         end
       end
 
-      -- indentify everywhere the same peaks exists exist in the normal spectra
+      -- indentify everywhere the same peaks exists in other normal spectra
       for typ,axes in pairs(e.data.spec.cpl) do
         if typ=='normal' then
           for ax, pl in pairs(axes) do
@@ -1092,7 +1050,7 @@ function initialize_data( norm )
                   if isharm and sp*sbh/bw>3 and sm<10 and not (nextiscloser) and not(isshaftmult) and not(isspmult) then
                     pk.flags=add_flag(pk.flags,'u')
                     if pk.subharmonics==nil then
-                      pk['subharmonics']={suborder=tonumber(tostring(round(sbh,2))),shaftspeedratio=round(sp,3),mult=mm}
+                      pk['subharmonics']={suborder=tonumber(tostring(round(sbh,2))),shaftspeedratio=round(sp,3),mult=m}
                     else
                       table.insert(pk.subharmonics,{suborder=tonumber(tostring(round(sbh,2))),shaftspeedratio=round(sp,3),mult=m})
                     end
@@ -1137,7 +1095,7 @@ function initialize_data( norm )
                               local r1=math.fmod(dmpk.sfreq,pl.peaks[pi+1].sfreq)
                               r1=math.min(math.abs(r1),math.abs(1-r1))
                               if r0<r1 or closer then
-                                if round(pk.sfreq/dmpk.sfreq,2) <=1.01 and round(pk.sfreq/dmpk.sfreq,2) >=.98 then  -- Look for demod peaks up to 7% higher freq from AQ-204 data
+                                if round(pk.sfreq/dmpk.sfreq,2) <=1.01 and round(pk.sfreq/dmpk.sfreq,2) >=.93 then  -- Open the search window enough to find AQ-204 demod which are up to 7% higher freq(one bin higher
                                   local dmamp=ds_spline_value( machine.datasets[dmpk.sdsi], dmpk.sbin )
                                   local dmmamp=ds_spline_avg( machine.datasets[dmpk.sdsi], dmpk.sbin )
                                   local sig=dmamp/dmmamp
@@ -1150,7 +1108,7 @@ function initialize_data( norm )
                                 closer=true
                               end
                             else
-                              if round(pk.sfreq/dmpk.sfreq,2) <=1 and round(pk.sfreq/dmpk.sfreq,2) >=.93 then  -- Look for demod peaks up to 7% higher freq from AQ-204 data
+                              if round(pk.sfreq/dmpk.sfreq,2) <=1.01 and round(pk.sfreq/dmpk.sfreq,2) >=.93 then  -- Open the search window enough to find AQ-204 demod which are up to 7% higher freq(one bin higher
                                 local dmamp=ds_spline_value( machine.datasets[dmpk.sdsi], dmpk.sbin )
                                 local dmmamp=ds_spline_avg( machine.datasets[dmpk.sdsi], dmpk.sbin )
                                 local sig=dmamp/dmmamp
@@ -1160,7 +1118,7 @@ function initialize_data( norm )
                               end  
                             end  
                           end 
-                          if dmpk.sfreq > pk.sfreq*1.07 then break end
+                          if dmpk.sfreq > pk.sfreq*1.08 then break end
                         end  
                       end  
                     end 
@@ -1210,9 +1168,8 @@ function initialize_data( norm )
                   nextiscloser=nisharm and nm==m and nr<r
                 end
                 if isharm and pk.sord/bw>3 and m<21 and not (nextiscloser) then
-
                   if hpk.sev~=nil then hsev=hsev+hpk.sev end
-                  henrgy=henrgy+ ConvertSpectrum( Unit.U_VDB , g_internal_unit    , hpk.sval )
+                  henrgy=henrgy+hpk.sval 
                   if hpk.subharmonics==nil and m~=1 then
                     hpk['subharmonics']={order=round(pk.sord,3),harm=m}
                   elseif m~=1 then
@@ -1269,7 +1226,7 @@ function initialize_data( norm )
                       end
                       if issame and spd/bw>3 and m==1 and not (nextiscloser) and typ=='normal' then
                         if spk.sev~=nil then ssev=ssev+spk.sev end
-                        senrgy=senrgy+ ConvertSpectrum( Unit.U_VDB , g_internal_unit    , spk.sval )
+                        senrgy=senrgy+  spk.sval 
                         if #sides==0 then table.insert(sides,pi) end
                         if spi~=pi then table.insert(sides,spi) end
                       end
@@ -1293,7 +1250,6 @@ function initialize_data( norm )
                 end   
               end
             end
-
           end -- peak
 
           -- build sorted list of normal peak list items at the axis level
@@ -1445,8 +1401,9 @@ function initialize_data( norm )
       end
     end
   end
---use this in the watch window for accw pumps to see the subcategories machine.elements[1].data.spec.cpl.normal.r[2]
-  g_peak_list=peak_list(sr1xs)
+
+  --g_peak_list=peak_list(sr1xs)  -- legency peak list, this line does not need to be in api
+
   for _,v in ipairs(rm_rulebase_info) do
     if v.lib.initialize then
       v.lib.initialize()
@@ -2323,7 +2280,7 @@ end
 --
 -- Error:      : if the tag does not exist then raise an error and pop out of the code.
 --
-  local function check_get_order_tag_index( tag, shaft_tag_index, composite_shaft_index )
+  local function check_get_order_tag_index( tag, shaft_tag_index, composite_shaft_index, no_error )
     shaft_tag_index = shaft_tag_index or 0
     if tag=="LF" or tag=="2XLF" then return shaft_tag_index end
     local ti
@@ -2340,11 +2297,21 @@ end
       elseif shaft_tag_index~=0 then
         shaft_number = find_component_for_index(ti)
       else  
-        error(M_ORDER_TAG(tag))
+        if no_error then
+          return nil
+        else
+          error(M_ORDER_TAG(tag))
+        end
       end
     end
 
-    if machine.components[shaft_number].forders[tag]==nil  then error(M_ORDER_TAG(tag)) end
+    if machine.components[shaft_number].forders[tag]==nil  then 
+      if no_error then
+        return nil
+      else
+        error(M_ORDER_TAG(tag)) 
+      end
+    end
     return (-shaft_number)
   end
 
@@ -2933,6 +2900,39 @@ end
     end
     return {["found"]=false}
   end
+-----------------------------------------------------
+
+-- 
+-- get_data_shaft_speed
+-- Use this function to get the best estimate of the current shaft speed in Hz
+-- based on the data.  It uses the composite data "shaftspeed.avg" of the pickup
+-- location.  It considers the actual pickup location, which may be different than
+-- the 
+-- example:
+--      local ele = get_element( index )
+--
+-- The calilng signiture with the ei_list parameter is ment for use only by this function.
+--
+function get_data_shaft_speed( shaft_data_index, axis )
+  local s  = safe_value_1( machine.components[g_shaft_number], M_SHAFT_INDEX, g_shaft_number )
+  local ele_data_index = safe_value_1( s.map[shaft_data_index], M_SHAFT_DATA_INDEX, shaft_data_index )
+  local ei = get_element_alias(ele_data_index) -- Data element.  May be an alias.
+  local e = machine.elements[ei]
+  if e.data==nil or e.data.spec==nil or e.data.spec.cpl==nil or e.data.spec.cpl.normal==nil then
+    error(M_DATA("spec","normal","composite"))
+  end
+  local tax = safe_value_3( e.data.spec.cpl.normal[axis], M_DATA, "spec", "normal", "composite.shaftspeed" )
+  local speed = safe_value_3( tax.shaftspeed.ave, M_DATA, "spec", "normal", "composite.shaftspeed" )
+  if ei~=ele_data_index then
+    local assi = find_super_shaft_with_element(ei)
+    if g_super_shaft_number~=assi then
+      local ss = get_this_super_shaft()
+      local ass = machine.supershafts[assi]
+      speed = speed * ss.speed_ratio / ass.speed_ratio
+    end
+  end
+  return speed
+end
 
 -- find_tag_in_matches
 --    Input:
@@ -3044,6 +3044,82 @@ end
     --val = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), val )
     --return { ["found"] = true, ["match"] = tag_match, ["dsi"] = mdi, ["order"] = (tag_match.bin * lbw / ds.speed), ["value"] = val }
     return { ["found"] = true, ["match"] = tag_match, ["dsi"] = mdi, ["order"] = ((tag_match.bin-1) * lbw / ds.speed), ["freq"] = (tag_match.bin-1) * lbw, ["bin"] = tag_match.bin, ["value"] = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ds_spline_value( ds, tag_match.bin ) ), ["mval"] = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ds_spline_avg( ds, tag_match.bin ) ) }
+
+end
+
+  function find_tag_info_cpl( tag, shaft_tag_index, shaft_data_index, axis, composite_shaft_index )
+    local ei = safe_value_1( machine.components[g_shaft_number].map[shaft_data_index], M_SHAFT_DATA_INDEX, shaft_data_index ) -- The index of the element that is a data pcikup
+    local ti
+    local spec
+    -- Example data layout
+    -- spec={
+    --    normal={ r={7,13},a={8,14},t={9,15} },       : The numbers are data set indexes.  
+    --    average={ r={19,31}, a={20,32}, t={21,33} }  : They could be high and low range data but we do not know here.
+    --    }
+
+    if tag=="LF" or tag=="2XLF" then
+      local ai = get_element_alias( ei )
+      ti = ai
+      local ele = machine.elements[ai]
+      spec = safe_value_3( ele.data.spec, M_DATA, "spec", "normal", axis )
+    else
+      ti = check_get_order_tag_index(tag, shaft_tag_index, composite_shaft_index )
+      spec = safe_value_3( get_element(ei).data.spec, M_DATA, "spec", "normal", axis )
+    end
+
+    local cpl = safe_value_3( spec["cpl"], M_DATA, "spec", "cpl", axis )
+    local dom = safe_value_3( cpl["normal"], M_DATA, "cpl", "normal", axis )
+    local pks = safe_value_3( dom[axis], M_DATA, "cpl", "normal", axis )
+    local peak = nil
+    local tag_match = nil
+    -- peak format:
+    --    aval
+    --    aord
+    --    abin
+    --    afreq
+    --    adsi
+    --    sval
+    --    sord
+    --    sbin
+    --    sfreq
+    --    sdsi
+    --    dif
+    --    pct
+    --    mval
+    --    mdif
+    --    mpct
+    --    fmax
+    --    order
+    --    sev
+    --    matches
+    --
+    -- matches format: (type, tag, ei, bin)
+    --    type  - F = fundemental, H = harmonic, S = sideband
+    --    tag   - Forcing Order tag
+    --    ei    - machine element index
+    --    bin   - bin position of peak in the data.  A real number and will be fractional.
+    --    order - for type H only.  The order of the harmonic.
+    for _,p in ipairs(pks.peaks) do
+      peak = p
+      tag_match = find_tag_in_matches( tag, ti, p.matches )
+      if tag_match then break end
+    end
+    
+    if tag_match==nil then
+      return {["found"]=false}
+    end
+    
+    local ds = machine.datasets[peak.sdsi]
+    return { 
+      ["found"] = true, 
+      ["match"] = tag_match, 
+      ["dsi"]   = peak.sdsi, 
+      ["order"] = peak.sord, 
+      ["freq"]  = peak.sfreq, 
+      ["bin"]   = tag_match.bin, 
+      ["value"] = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ds_spline_value( ds, tag_match.bin ) ), 
+      ["mval"]  = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ds_spline_avg( ds, tag_match.bin ) ) 
+      }
 
   end
 
@@ -3221,7 +3297,8 @@ end
 --
   function analyze_by_tag( tag, shaft_tag_index, shaft_data_index, axis, polish_avg_peak, composite_shaft_index )  
     polish_avg_peak = polish_avg_peak or (true)
-    local r1 = find_tag_info( tag, shaft_tag_index, shaft_data_index, axis, composite_shaft_index )
+    --local r1 = find_tag_info( tag, shaft_tag_index, shaft_data_index, axis, composite_shaft_index )
+    local r1 = find_tag_info_cpl( tag, shaft_tag_index, shaft_data_index, axis, composite_shaft_index )
     if r1.found==false then return { ["found"]=false } end
     local r2 = find_order_info( r1.order, shaft_data_index, "average", axis )
     if r2.found==false then
@@ -3392,15 +3469,15 @@ end
           for p,pk in ipairs (harm_indexes) do
             pk=tonumber(pk)
             local so=pl.peaks[pk].sord
-            local sv=pl.peaks[pk].sval
-            local  mv=pl.peaks[pk].mval
+            local sv=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[pk].sval)
+            local  mv=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[pk].mval)
             local flag=pl.peaks[pk].flags or '-'
             if not((string.match(flag,'m')~=nil or string.match(flag,'l')~=nil or string.match(flag,'f')~=nil or string.match(flag,'x')~=nil ) and  remove_matches) then  
               if pl.peaks[pk].aval~=nil then          
-                local av=pl.peaks[pk].aval
-                table.insert(harm_info,{pk_index=pk,sord=so, sval=sv, dif=sv-av, aval=av, mval=mv, mdif=sv-mv, sbin=pl.peaks[pk].sbin,sfreq=pl.peaks[pk].sfreq})
+                local av=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[pk].aval)
+                table.insert(harm_info,{pk_index=pk,sord=so, sval=sv, dif=sv-av, aval=av, mval=mv, mdif=sv-mv, sbin=pl.peaks[pk].sbin,sfreq=pl.peaks[pk].sfreq,mpct=pl.peaks[pk].mpct,pct=pl.peaks[pk].pct})
               else
-                table.insert(harm_info,{sord=so, sval=sv, mval=mv, mdif=sv-mv, sbin=pl.peaks[pk].sbin,sfreq=pl.peaks[pk].sfreq})
+                table.insert(harm_info,{sord=so, sval=sv, mval=mv, mdif=sv-mv, sbin=pl.peaks[pk].sbin,sfreq=pl.peaks[pk].sfreq,mpct=pl.peaks[pk].mpct})
               end
             end
           end  -- for p,pk
@@ -3434,9 +3511,9 @@ end
               harm=tonumber(harm)
               local order=round(pl.peaks[harm].sfreq/taghz)
               if order > max_order then max_order = order end
-              local s = pl.peaks[harm].sval
-              local m = pl.peaks[harm].mval
-              local a = pl.peaks[harm].aval
+              local s =ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),  pl.peaks[harm].sval)
+              local m =ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[harm].mval)
+              local a =ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[harm].aval)
               if a~=nil then
                 table.insert( ret_matches, { 
                     ["order"] =order,
@@ -3451,9 +3528,9 @@ end
                     ["abin"] = pl.peaks[harm].abin,
                     ["adsi"] = pl.peaks[harm].adsi,
                     ["dif"] = (s-a), 
-                    ["pct"] = (s-a)/a,
+                    ["pct"] = pl.peaks[harm].pct,
                     ["mdif"] = (s-m), 
-                    ["mpct"] = (s-m)/m
+                    ["mpct"] = pl.peaks[harm].mpct
                     } )
               else
                 table.insert( ret_matches, { 
@@ -3465,7 +3542,7 @@ end
                     ["sbin"] = pl.peaks[harm].sbin,
                     ["sdsi"] = pl.peaks[harm].sdsi,
                     ["mdif"] = (s-m), 
-                    ["mpct"] = (s-m)/m
+                    ["mpct"] = pl.peaks[harm].mpct
                     } )
               end
             end   -- for h,harm
@@ -3495,9 +3572,9 @@ end
               local order=round(pl.peaks[tonumber(harm)].sord/speed)
               if order>=1 then
                 if order> max_order then max_order = order end
-                local s = pl.peaks[tonumber(harm)].sval
-                local m = pl.peaks[tonumber(harm)].mval
-                local a = pl.peaks[tonumber(harm)].aval
+                local s =ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[tonumber(harm)].sval)
+                local m =ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[tonumber(harm)].mval)
+                local a =ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[tonumber(harm)].aval)
                 if a~=nil then
                   table.insert( ret_matches, { 
                       ["order"] = order,
@@ -3512,9 +3589,9 @@ end
                       ["abin"] = pl.peaks[tonumber(harm)].abin,
                       ["adsi"] = pl.peaks[tonumber(harm)].adsi,
                       ["dif"] = (s-a), 
-                      ["pct"] = (s-a)/a,
+                      ["pct"] = pl.peaks[tonumber(harm)].pct,
                       ["mdif"] = (s-m), 
-                      ["mpct"] = (s-m)/m,
+                      ["mpct"] = pl.peaks[tonumber(harm)].mpct,
                       ['matches']=pl.peaks[tonumber(harm)].matches
                       } )
                 else 
@@ -3527,7 +3604,7 @@ end
                       ["sbin"] = pl.peaks[tonumber(harm)].sbin,
                       ["sdsi"] = pl.peaks[tonumber(harm)].sdsi,
                       ["mdif"] = (s-m), 
-                      ["mpct"] = (s-m)/m,
+                      ["mpct"] = pl.peaks[tonumber(harm)].mpct,
                       ['matches']=pl.peaks[tonumber(harm)].matches
                       } ) 
                 end 
@@ -3557,9 +3634,6 @@ end
                   number=machine.components[cn].map[element]
                 end
                 if math.abs(mtch.cn)==number and mtch.tag==strtag and mtch.type=='F' then
-                  if mtch.tag==stoptag then
-                    debugprint(stoptag)
-                  end
                   matchfound=true
                   local result = {}
                   if #pk.harm_pk_index>0 then 
@@ -3567,9 +3641,9 @@ end
                       local order=round(pl.peaks[tonumber(harm)].sord/pl.peaks[i].sord)
                       if order>=1 then
                         if order> max_order then max_order = order end
-                        local s = pl.peaks[tonumber(harm)].sval
-                        local m = pl.peaks[tonumber(harm)].mval
-                        local a = pl.peaks[tonumber(harm)].aval
+                        local s = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[tonumber(harm)].sval)
+                        local m = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[tonumber(harm)].mval)
+                        local a = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[tonumber(harm)].aval)
                         if a~=nil then
                           table.insert( ret_matches, { 
                               ["order"] = order,
@@ -3584,9 +3658,9 @@ end
                               ["abin"] = pl.peaks[tonumber(harm)].abin,
                               ["adsi"] = pl.peaks[tonumber(harm)].adsi,
                               ["dif"] = (s-a), 
-                              ["pct"] = (s-a)/a,
+                              ["pct"] = pl.peaks[tonumber(harm)].pct,
                               ["mdif"] = (s-m), 
-                              ["mpct"] = (s-m)/m
+                              ["mpct"] = pl.peaks[tonumber(harm)].mpct
                               } )
                         else
                           table.insert( ret_matches, { 
@@ -3598,7 +3672,7 @@ end
                               ["sbin"] = pl.peaks[tonumber(harm)].sbin,
                               ["sdsi"] = pl.peaks[tonumber(harm)].sdsi,
                               ["mdif"] = (s-m), 
-                              ["mpct"] = (s-m)/m
+                              ["mpct"] =pl.peaks[tonumber(harm)].mpct
                               } ) 
                         end 
                       end -- if order>1
@@ -3628,9 +3702,9 @@ end
               local order=round(pl.peaks[tonumber(harm)].sord/speed)
               if order>=1 then
                 if order> max_order then max_order = order end
-                local s = pl.peaks[tonumber(harm)].sval
-                local m = pl.peaks[tonumber(harm)].mval
-                local a = pl.peaks[tonumber(harm)].aval
+                local s = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[tonumber(harm)].sval)
+                local m = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[tonumber(harm)].mval)
+                local a = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[tonumber(harm)].aval)
                 if a~=nil then
                   table.insert( ret_matches, { 
                       ["order"] = order,
@@ -3645,9 +3719,9 @@ end
                       ["abin"] = pl.peaks[tonumber(harm)].abin,
                       ["adsi"] = pl.peaks[tonumber(harm)].adsi,
                       ["dif"] = (s-a), 
-                      ["pct"] = (s-a)/a,
+                      ["pct"] = pl.peaks[tonumber(harm)].pct,
                       ["mdif"] = (s-m), 
-                      ["mpct"] = (s-m)/m,
+                      ["mpct"] = pl.peaks[tonumber(harm)].mpct,
                       ['matches']=pl.peaks[tonumber(harm)].matches
                       } )
                 else
@@ -3660,7 +3734,7 @@ end
                       ["sbin"] = pl.peaks[tonumber(harm)].sbin,
                       ["sdsi"] = pl.peaks[tonumber(harm)].sdsi,
                       ["mdif"] = (s-m), 
-                      ["mpct"] = (s-m)/m,
+                      ["mpct"] = pl.peaks[tonumber(harm)].mpct,
                       ['matches']=pl.peaks[tonumber(harm)].matches
                       } ) 
                 end 
@@ -3677,15 +3751,179 @@ end
     end -- if strtag==""
     return {found=false}
   end
+  
+  --====================================
+function get_harmonics( shaft_data_index, axis, remove_matches, severity_threshold )  
+  remove_matches=remove_matches or false
+  severity_threshold=severity_threshold or 0
+  local ele = get_element(shaft_data_index)
+  local pl=ele.data.spec.cpl.normal[axis]
+  local harm_info={}
+  local harms={}
+
+  for _,indx in pairs (pl.sorts.harm_severity) do
+    local harm_indexes=pl.peaks[indx].harm_pk_index
+    local severity=pl.peaks[indx].harm_severity
+    if severity>=severity_threshold then
+      for _,pk in ipairs (harm_indexes) do
+        local so=pl.peaks[pk].sord
+          local sv=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[pk].sval)
+          local  mv=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[pk].mval)
+        local flag=pl.peaks[pk].flags or '-'
+        if remove_matches and string.match(flag,'m')==nil and string.match(flag,'l')==nil and string.match(flag,'f')==nil and string.match(flag,'x')==nil then  
+            local av =ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[pk].aval)
+          local dv = nil
+          if av then dv = sv-av end
+          table.insert(harm_info,
+                      { pk_index=pk,
+                        sord=so, 
+                        sval=sv, 
+                        dif= dv, -- could be nil 
+                        aval=av, -- could be nil
+                pct=pl.peaks[pk].pct, -- could be nil
+                mval=mv, 
+                mdif=sv-mv,
+                mpct=-pl.peaks[pk].mpct,
+                        sbin=pl.peaks[pk].sbin,
+                        sfreq=pl.peaks[pk].sfreq
+                      })
+        end
+      end  -- for p,pk
+      table.insert( harms,
+                    { harm_severity=severity or 0, -- REVIEW: Why?  severity is gauranteed to have value
+                      harm_sord=pl.peaks[tonumber(harm_indexes[1])].sord,
+                      harm_sfreq=pl.peaks[tonumber(harm_indexes[1])].sfreq,
+                      harm_pk_index=indx ,
+                      num_harmonics=#harm_indexes, 
+                      harm_fundamental_pk_matches=pl.peaks[tonumber(harm_indexes[1])].matches, 
+                      harmonic_info=harm_info
+                    })
+      harm_info={}
+    end  -- if severity>=severity_threshold
+  end  -- for i,indx
+  return {found=true, harmonics=harms}
+end
+  
+  
+-- analyze_harmonic_by_tag
+-- Notes:
+--    This function compares "normal" spectrum data to "average" data.  
+--    It looks for the harmonics of the input tag.
+-- Input:
+--    tag               : a forcing order tag
+--    shaft_tag_index   : shaft index position of the tag
+--    shaft_data_index  : shaft index position of the data
+--    axis              : data axis (r,a, or t)
+-- Output:
+--    result  - A table with the following entries:
+--        found   : true or false.  If false no other entries in table.
+--        orders  : the maximum harmonic order found, some lower orders may be missing
+--        count   : the number of entries in the matches table
+--        matches : a table with data about each harmonic match
+--           Each entry in the matches table has the following entries:
+--                sval  : current spectra value
+--                mval  : current spectra moving average value
+--                aval  : average value
+--                sord  : the position of the identified tag in orders of rotation in the signal
+--                aord  : the position of the identified tag in orders of rotation in the average data
+--                sfreq : the position of the identified tag in frequency in the signal
+--                sdsi  : the data set index, use with machine.dataset
+--                adsi  : the average data set index, use with machine.dataset
+--                sbin  : the position of the identified tag in bins in the signal
+--                abin  : the position of the identified tag in bins in the average
+--                dif   : the differance (sval - aval)
+--                pct   : percent difference between sval and aval
+--                mdif   : the differance (sval - mval)
+--                mpct   : percent difference between sval and mval
+--
+--
+--   REVIEW: Something not right... each match has an order match.. see error at line 1022 in rulebase_functions
+--
+function analyze_harmonic_by_tag_cpl( tag, shaft_tag_index, shaft_data_index, axis )  
+  local element = shaft_tag_index
+  local brg = shaft_data_index
+  local strtag=string.upper(tag)    
+  local ele = get_element(brg)
+  local pl=ele.data.spec.cpl.normal[axis]
+  local shaftspeed=ele.speedratio
+  --local harm_info={}
+  local harms={}
+  --local cn=get_this_comp_number()
+  --local spratios=get_comp_speed_ratios()
+  --local compspeedrat=spratios[cn]
+  local result={}
+
+  local ti=check_get_order_tag_index(strtag,shaft_tag_index,nil,true)   
+  if not ti then
+    return {found=false}
+  end
+
+  local ret_matches = {}
+  local max_order = 0      
+  for i,pk in pairs (pl.peaks) do
+    local mtch = find_tag_in_matches( strtag, ti, pk.matches )
+    if mtch then
+      for h,harm in ipairs(pk.harm_pk_index) do 
+        local order=round(pl.peaks[tonumber(harm)].sord/pl.peaks[i].sord)
+        if order>=1 then
+          if order> max_order then max_order = order end
+          local s = pl.peaks[harm].sval
+          local m = pl.peaks[harm].mval
+          local a = pl.peaks[harm].aval
+          if a~=nil then
+            table.insert( ret_matches, { 
+                ["order"] = order,
+                ["sval"]  = s, 
+                ["mval"]  = m, 
+                ["sord"]  = pl.peaks[harm].sord, 
+                ["sfreq"] = pl.peaks[harm].sfreq,
+                ["sbin"]  = pl.peaks[harm].sbin,
+                ["sdsi"]  = pl.peaks[harm].sdsi,
+                ["aval"]  = a, 
+                ["aord"]  = pl.peaks[harm].aord,
+                ["abin"]  = pl.peaks[harm].abin,
+                ["adsi"]  = pl.peaks[harm].adsi,
+                ["dif"]   = (s-a), 
+                ["pct"]   = (s-a)/a,
+                ["mdif"]  = (s-m), 
+                ["mpct"]  = (s-m)/m
+                } )
+          else
+            table.insert( ret_matches, { 
+                ["order"] = order,
+                ["sval"]  = s, 
+                ["mval"]  = m, 
+                ["sord"]  = pl.peaks[harm].sord, 
+                ["sfreq"] = pl.peaks[harm].sfreq,
+                ["sbin"]  = pl.peaks[harm].sbin,
+                ["sdsi"]  = pl.peaks[harm].sdsi,
+                ["mdif"]  = (s-m), 
+                ["mpct"]  = (s-m)/m
+                } ) 
+          end 
+        end -- if order>1
+      end --- for h,harm
+    end -- if mtch
+  end -- for i,pk 
+
+  result["orders"] = max_order
+  result["count"] = #ret_matches
+  result["matches"] = ret_matches
+  result['found']=true
+  return result
+end
+  
+  --====================================================================
+  
 -- this function evaluates a tone to determine is it is likely cross talks from another source
   function cross_talk(element,brg,axis,pk_index,key,ct_limit)
     ct_limit=ct_limit or 12
     if true then
-      local bearing,alias,spdratio =z_get_brg_and_data_set_speed_ratio(element,brg)
+      local alias = get_element_alias(brg)
       local pk=machine.elements[alias].data.spec.cpl.normal[axis].peaks[pk_index]
       if pk.elsewhere[key]==nil then return false,0  end
       for _,ax in ipairs(pk.elsewhere[key]) do
-        if ax.mi~=alias and ax.axis==axis and pk.sval<=ax.sval-ct_limit then return true,ax.mi end
+        if ax.mi~=alias and ax.axis==axis and ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pk.sval)<=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),ax.sval)-ct_limit then return true,ax.mi end
       end
     end
     return false,0
@@ -3693,7 +3931,7 @@ end
 
 -- This function return a lists of tones  with significant sideband groups (1X for all shafts and LF) sorted sb severity
   function get_sideband_groups_from_cpl(element,brg,axis,remove_matches,sev_th,nr)
-    local bearing,alias,spdratio =z_get_brg_and_data_set_speed_ratio(element,brg)
+    local alias = get_element_alias(brg)
     local pl=machine.elements[alias].data.spec.cpl.normal[axis]
     local shaftspeed=machine.elements[alias].speedratio
     remove_matches=remove_matches or false
@@ -3722,17 +3960,17 @@ end
         for _,sbi in ipairs (sb_indexes) do
           sbi=tonumber(sbi)
           local so=pl.peaks[sbi].sord
-          local sv=pl.peaks[sbi].sval
+          local sv=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[sbi].sval)
           if sv>maxamp then
             maxamp=sv
             maxampindex=sbi
           end
-          local av=pl.peaks[sbi].aval
-          local  mv=pl.peaks[sbi].mval
+          local av=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[sbi].aval)
+          local  mv=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[sbi].mval)
           local flag=pl.peaks[sbi].flags or '-'
           if not((string.match(flag,'m')~=nil or string.match(flag,'l')~=nil or string.match(flag,'f')~=nil or string.match(flag,'x')~=nil ) and  remove_matches) then   
             if av~=nil then
-              table.insert(sb_info,{sord=so, sval=sv, dif=sv-av, aval=av, mval=mv, mdif=sv-mv, sbin=pl.peaks[sbi].sbin, pk_index=sbi,sfreq=pl.peaks[sbi].sfreq})
+              table.insert(sb_info,{sord=so, sval=sv, dif=sv-av, aval=av, mval=mv, mdif=sv-mv, sbin=pl.peaks[sbi].sbin, pk_index=sbi,sfreq=pl.peaks[sbi].sfreq,pct=pl.peaks[sbi].pct,mpct=pl.peaks[sbi].mpct})
             end
           end
         end  --  for _,sbi
@@ -3748,7 +3986,7 @@ end
 
 -- this function returns a list of tones sorted by amplitude that are not flagged as a multiple of shaft rate or LF, part of a signiticant harmonic of sideband series, or a match 
   function get_usual_tones_from_cpl(element,brg,axis,sev_th,nr,sval_th)
-    local bearing,alias,spdratio =z_get_brg_and_data_set_speed_ratio(element,brg)
+    local alias = get_element_alias(brg)
     local pl=machine.elements[alias].data.spec.cpl.normal[axis]
     local shaftspeed=machine.elements[alias].speedratio
     --local pl={}
@@ -3762,7 +4000,7 @@ end
     local dsmi=alias
     local umtones={}
     for i,indx in pairs (pl.sorts.sval) do
-      local sv=pl.peaks[indx].sval
+      local sv=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[indx].sval)
       local flag=pl.peaks[indx].flags or '-'
       local sbg=pl.peaks[indx].sidebands
       local lfsb=false
@@ -3774,20 +4012,15 @@ end
           local so=pl.peaks[indx].sord
           local pkis1x,x,rmdr =z_is_a_multiple(1,so,.005)
           pkis1x=pkis1x and x==1
-          --local x,rmdr = math.modf(so)      
-          --x=math.modf(x+round(rmdr))       
-          if pkis1x --[[x==1 and (rmdr<.02 or 1-rmdr<.02]] then 
-            freq1x=pl.peaks[indx].sfreq
-          end
-          local  mv=pl.peaks[indx].mval
+          local  mv=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[indx].mval)
           if pl.peaks[indx].aval~=nil then          
-            local av=pl.peaks[indx].aval
+            local av=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[indx].aval)
             local dif=sv-av
             if  dif>3 then 
-              table.insert(umtones,{pk_index=indx,sord=so, sval=sv, dif=dif, aval=av, mval=mv, mdif=sv-mv, sbin=pl.peaks[indx].sbin,sfreq=pl.peaks[indx].sfreq})
+              table.insert(umtones,{pk_index=indx,sord=so, sval=sv, dif=dif, aval=av, mval=mv, mdif=sv-mv, sbin=pl.peaks[indx].sbin,sfreq=pl.peaks[indx].sfreq,pct=pl.peaks[indx].pct,mpct=pl.peaks[indx].mpct})
             end
           else
-            table.insert(umtones,{sord=so, sval=sv, mval=mv, mdif=sv-mv, sbin=pl.peaks[indx].sbin,sfreq=pl.peaks[indx].sfreq})
+            table.insert(umtones,{sord=so, sval=sv, mval=mv, mdif=sv-mv, sbin=pl.peaks[indx].sbin,sfreq=pl.peaks[indx].sfreq,mpct=pl.peaks[indx].mpct})
           end
         end
       end  -- if sv>=sv_th
@@ -3835,9 +4068,6 @@ end
                       svalue[cnt]['mi']=ei
                       svalue[cnt]['pk_index']=pi
                       svalue[cnt]['sval']=pk.sval
-                      if pk.dif~=nil then
-                        svalue[cnt]['dif']=pk.dif
-                      end
                       break
                     end
                   end
