@@ -182,7 +182,7 @@ function match_peaks( ds, orders )
     has_order = 1
     unique_orders[ord] = false
   end
-   
+
   -- Beleive it or not checking the size of orders has to be done this way.
   -- #orders only works for array type tables.  It doesn't work here.  So we have
   -- to set a flag to show we dropped into the loop above to know.
@@ -225,7 +225,7 @@ function match_peaks( ds, orders )
       end
     end
   end
-  
+
   --------------------------------------------------
   -- Search for line frequency
   -- Compute line frequency order based on speed
@@ -236,7 +236,7 @@ function match_peaks( ds, orders )
   cord = 2.0 * machine.linef / speed
   ctag = "2XLF:".. math.floor( ds.mi + 0.5 )
   table.insert(lft,{["cord"]=cord,["ctag"]=ctag})
-  
+
   for _,lfi in ipairs(lft) do
     local obin = speed*lfi.cord / binwidth
     -- NOTE: The search range is narrower for line frequency.
@@ -472,10 +472,10 @@ local function update_dataset_speeds(sr1xs)
         end
       end 
     end
-    --remove outliers were sigma is greater than 1%  on fixed speed machines and 10% on non-fixed speed machines
+    --remove outliers were sigma is greater than .5%  on fixed speed machines and 5% on non-fixed speed machines (changed turbines to 5% because Mn Circs were having problem on pump.)
     local removed=false
     local spdvar=.005
-    if not (fixedspeed)  then spdvar=.1 end 
+    if not (fixedspeed)  then spdvar=.05 end 
     avespd=sum/n
     if n>2 then sigma=math.sqrt((sumsqr-(sum^2/n))/(n-1)) end  
     debugprint('ave speed: '..round(avespd,1),'sigma: '..round(sigma,2),'% dev: '..round(100*sigma/avespd,2)..' allowable % dev: '..spdvar*100) 
@@ -618,12 +618,13 @@ local function update_dataset_speeds(sr1xs)
                       end
                     end
                   end
-                end
-                if not (updated) and miaspeed>0 then
-                  debugprint('Pickup: '..sr1x.mi..' Axis: '..sr1x.axis..' dsi: '..ds..' Fmax: '..round(fm)..' speed set to: '..round(miaspeed,3)..' hz '..round(miaspeed*60/sr1x.shaftspeed,2))
-                  machine.datasets[ds].speed=miaspeed
-                  --add_1x_place_holders_to_ds_peaks (ds,i) 
-                  updated=true
+                  --end
+                  if not (updated) and miaspeed>0 then
+                    debugprint('Pickup: '..sr1x.mi..' Axis: '..sr1x.axis..' dsi: '..ds..' Fmax: '..round(fm)..' speed set to: '..round(miaspeed,3)..' hz '..round(miaspeed*60/sr1x.shaftspeed,2))
+                    machine.datasets[ds].speed=miaspeed
+                    --add_1x_place_holders_to_ds_peaks (ds,i) 
+                    updated=true
+                  end
                 end
               end
             end
@@ -637,33 +638,33 @@ end
 
 -- This function puts an 'n' flag on the tones in the peak list that were used to normalize
 local function flag_normalized_peaks_in_cpl(sr1xs)
-    for ei,e in ipairs(machine.elements) do 
-      if e.data~=nil and e.data.spec~=nil and e.data.spec.cpl~=nil then
-        for typ,axes in pairs(e.data.spec.cpl) do
-          if typ=='normal' then
-            for ax, pl in pairs(axes) do
-              for _,mia in ipairs(sr1xs) do
-                if mia.mi==ei and ax==mia.axis then
-                  for _,i in pairs(mia.info) do
-                    if i.sbin~=nil then
-                      for _,pk in ipairs (pl.peaks) do
-                        if i.sbin==pk.sbin then 
-                          local flags=pk.flags
-                          pk.flags=add_flag(flags,'n')
-                          break
-                        end
+  for ei,e in ipairs(machine.elements) do 
+    if e.data~=nil and e.data.spec~=nil and e.data.spec.cpl~=nil then
+      for typ,axes in pairs(e.data.spec.cpl) do
+        if typ=='normal' then
+          for ax, pl in pairs(axes) do
+            for _,mia in ipairs(sr1xs) do
+              if mia.mi==ei and ax==mia.axis then
+                for _,i in pairs(mia.info) do
+                  if i.sbin~=nil then
+                    for _,pk in ipairs (pl.peaks) do
+                      if i.sbin==pk.sbin then 
+                        local flags=pk.flags
+                        pk.flags=add_flag(flags,'n')
+                        break
                       end
                     end
                   end
-                end 
-              end
+                end
+              end 
             end
           end
         end
       end
     end
-    return 
   end
+  return 
+end
 
 
 
@@ -718,8 +719,13 @@ end
 
 function pattern_normalize(range)
   local percent_pattern_match=30
-  local peak_quality=machine.scale  -- defines minimum mdif for use calculating speed (fans have short peaks and need smaller mdif)
-  if peak_quality==0 then peak_quality=10 end
+  local peak_quality=machine.scale  -- defines minimum mpct for use calculating speed (fans have short peaks and need smaller mpct)
+  if peak_quality~=0 then 
+    peak_quality=10^(peak_quality/20)
+  else
+   peak_quality=10^(10/20)
+ end
+ 
   local sss = machine.supershafts
   local speeds = compute_super_shaft_speeds(sss, machine.ispeed, 1.0 )
   local fff = MakeForcingOrdersForSuperShafts(sss, true )
@@ -764,26 +770,25 @@ function pattern_normalize(range)
         local speedfound=false
         -- Deterimine if there are enough forcing orders to pattern match by building a table of orders to match
         local pattern={}
+        local ptrn={}
         if #ff>=1 then 
+
           -- build pattern table
           for _,f in ipairs(ff) do
-            local dup=false
             local ord=f.speed/e.speedratio*f.order 
-            if #pattern>0 then
-              for _,p in ipairs(pattern) do
-                dup=p==f.speed/e.speedratio*f.order
-                if dup then break end
-              end
-            end
-            if not(dup) and ord>.1 then table.insert(pattern,ord) end
+            ptrn[tostring(ord)]=true
           end
-          --local function sort(a,b) return a>b end
+          for ord,_ in pairs(ptrn) do
+            table.insert(pattern,tonumber(ord))
+          end
           table.sort(pattern,function (a,b) return a<b end)
--- get the data ranges
+
+          -- get the data ranges
           local dataranges={}
           for _,ds in ipairs(e.data.spec.normal[ax]) do
             table.insert(dataranges,{dsi=ds,orders=machine.datasets[ds].fmax/(machine.speed*e.speedratio)})  -- set the dataset max orders based on  machineclass nominal speed
           end
+
           -- sort the data ranges
           local moved=true
           local temp={}
@@ -849,10 +854,10 @@ function pattern_normalize(range)
               maxte=0
               maxct=0
               freq1x=0
-              for p,pk1 in ipairs (inf.peaks) do  -- subject peaks
+              for p,pk1 in ipairs (inf.peaks) do                    -- subject peaks
                 if pk1.sord>dr.orders then break end 
                 if pk1.sord>=lastorders and pk1.sord<=dr.orders then
-                  for s,sp in ipairs (speeds) do  -- speeds of each shaft
+                  for s,sp in ipairs (speeds) do                    -- speeds of each shaft
                     if (dr.orders/(sp/e.speedratio) < 300 and sp~=1) or sp==1 then
                       local harms=100 
                       if sp/e.speedratio<.25 then harms=15 end
@@ -875,8 +880,7 @@ function pattern_normalize(range)
                                   --
                                   -- is subject peak prominant and is this peak slighty significant and not the noise floor
                                   --
-                                  if itismult and mult==1 and pk1.mdif>peak_quality and (pk2.mdif>1 and pk2.sval>minamp+(.1*dynamicrange)) then
-                                    --debugprint(round(pt,3).." match at "..round(pk2.sord,3),round((pk1.sord/(sp/e.speedratio)),3)..'/'..i,round(pk1.sord,3))
+                                  if itismult and mult==1 and pk1.mpct>peak_quality and (pk2.mpct>.2 and pk2.sval>minamp+(.1*dynamicrange)) then
                                     --
                                     -- add a slight weighting to 1x in pattern for cases were the higher orders have tight side bands 
                                     --
@@ -900,7 +904,7 @@ function pattern_normalize(range)
                             sbin=pk1.sbin
                             maxte=te*ct
                             maxct=ct
-                            debugprint(">>>",p,i,round((sp/e.speedratio)*e.speedratio,3),round(pk1.sfreq,1),round ((pk1.sfreq/(sp/e.speedratio))/i,1),round ((pk1.sfreq/(sp/e.speedratio))/i*60,1),round(te),ct,'mdif:'..round(pk1.mdif),round ((pk1.sfreq/(sp/e.speedratio))/i*60/e.speedratio,1), maxct)
+                            debugprint(">>>",p,i,round((sp/e.speedratio)*e.speedratio,3),round(pk1.sfreq,1),round ((pk1.sfreq/(sp/e.speedratio))/i,1),round ((pk1.sfreq/(sp/e.speedratio))/i*60,1),round(te),ct,'mpct:'..round(pk1.mpct),round ((pk1.sfreq/(sp/e.speedratio))/i*60/e.speedratio,1), maxct)
                           end  -- how many matches
                         end  -- is calculated 1x in searchranges
                       end -- harmonic of interest

@@ -2924,7 +2924,7 @@ function get_data_shaft_speed( shaft_data_index, axis )
   local tax = safe_value_3( e.data.spec.cpl.normal[axis], M_DATA, "spec", "normal", "composite.shaftspeed" )
   local speed = safe_value_3( tax.shaftspeed.ave, M_DATA, "spec", "normal", "composite.shaftspeed" )
   if ei~=ele_data_index then
-    local assi = find_super_shaft_with_element(ei)
+    local assi = find_super_shaft_with_element(machine.supershafts, ei)
     if g_super_shaft_number~=assi then
       local ss = get_this_super_shaft()
       local ass = machine.supershafts[assi]
@@ -3805,7 +3805,7 @@ function get_harmonics( shaft_data_index, axis, remove_matches, severity_thresho
 end
   
   
--- analyze_harmonic_by_tag
+-- analyze_harmonic_by_tag_cpl
 -- Notes:
 --    This function compares "normal" spectrum data to "average" data.  
 --    It looks for the harmonics of the input tag.
@@ -3836,9 +3836,6 @@ end
 --                mdif   : the differance (sval - mval)
 --                mpct   : percent difference between sval and mval
 --
---
---   REVIEW: Something not right... each match has an order match.. see error at line 1022 in rulebase_functions
---
 function analyze_harmonic_by_tag_cpl( tag, shaft_tag_index, shaft_data_index, axis )  
   local element = shaft_tag_index
   local brg = shaft_data_index
@@ -3867,9 +3864,12 @@ function analyze_harmonic_by_tag_cpl( tag, shaft_tag_index, shaft_data_index, ax
         local order=round(pl.peaks[tonumber(harm)].sord/pl.peaks[i].sord)
         if order>=1 then
           if order> max_order then max_order = order end
-          local s = pl.peaks[harm].sval
-          local m = pl.peaks[harm].mval
-          local a = pl.peaks[harm].aval
+          local sr = pl.peaks[harm].sval
+          local mr = pl.peaks[harm].mval
+          local ar = pl.peaks[harm].aval
+          local s = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), sr )
+          local m = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), mr )
+          local a = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ar )
           if a~=nil then
             table.insert( ret_matches, { 
                 ["order"] = order,
@@ -3884,9 +3884,10 @@ function analyze_harmonic_by_tag_cpl( tag, shaft_tag_index, shaft_data_index, ax
                 ["abin"]  = pl.peaks[harm].abin,
                 ["adsi"]  = pl.peaks[harm].adsi,
                 ["dif"]   = (s-a), 
-                ["pct"]   = (s-a)/a,
+                ["pct"]   = (sr-ar)/ar,
                 ["mdif"]  = (s-m), 
-                ["mpct"]  = (s-m)/m
+                ["mpct"]  = (sr-mr)/mr,
+                ['matches']=pl.peaks[harm].matches
                 } )
           else
             table.insert( ret_matches, { 
@@ -3898,7 +3899,8 @@ function analyze_harmonic_by_tag_cpl( tag, shaft_tag_index, shaft_data_index, ax
                 ["sbin"]  = pl.peaks[harm].sbin,
                 ["sdsi"]  = pl.peaks[harm].sdsi,
                 ["mdif"]  = (s-m), 
-                ["mpct"]  = (s-m)/m
+                ["mpct"]  = (s-m)/m,
+                ['matches']=pl.peaks[harm].matches
                 } ) 
           end 
         end -- if order>1
