@@ -1,4 +1,4 @@
--- 3-6-18 rev 8
+-- 11-27-2018 rev 9
 -- rec_rulebase_functions
 
 --
@@ -60,11 +60,10 @@ function recommendation_cleanup()
   end
 end
 
-function  rulebase_final_processing()
-  debugprint( "CVAT final_processing called" )
+function rulebase_final_processing()
+  debugprint("CVAT final_processing Called")
   recommendation_cleanup()
 end
-
 
 
 

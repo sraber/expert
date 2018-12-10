@@ -1,4 +1,4 @@
--- Created Date: 11/5/2018 12:07:37 PM
+-- Created Date: 11/28/2018 3:37:34 PM
 function load_rec_rules(g_rec_rules)
 g_datanormalizationerrorguid='4d535592-5633-4a3d-92e5-c9ac0453294f'
 -- **************************************
