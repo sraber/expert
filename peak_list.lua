@@ -46,7 +46,7 @@ function reduced_peak_list()
       ndif=0
       tdif=0
       for j,pk in ipairs(mia.peaks) do  -- add amplitudes to normal data peaks
-        avefmax=0
+        local avefmax=0
         local flags=pk.flags or '-'
         amp=ds_spline_value( machine.datasets[pk.ds], pk.bin )
         s=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , amp )
@@ -516,10 +516,10 @@ function z_analyze_peaklist_for_harmonics(peak_list,minimize)
       local cfreq=column.sfreq
       local cbin=column.sbin
       local cres=col/cbin
+      local lfx2=false
       if cfreq<=1.02*machine.linef*16 then -- check for LF harmonics in the area for peak below 900 Hz
         x,rmdr = math.modf(cfreq/(machine.linef*2))      
         x=math.floor(x+round(rmdr)) 
-        local lfx2=false
         local nextiscloser=false
         if i<(#mia.peaks-1) then
           local nexti=mia.peaks[i+1].sfreq
@@ -986,7 +986,7 @@ function z_get_harmonic_groups_from_peak_list(element,brg,axis,strtag,remove_mat
       end
     elseif strtag~='1X' then -- if strtag==""
       if tonumber(strtag)~=nil then 
-        --local speed=compspeedrat/pl[mia].shaftspeed
+        local speed=compspeedrat/pl[mia].shaftspeed
         local harms=pl[mia].shaftharms[strtag]
         local max_order = 0 
         --matchfound=true
@@ -1059,9 +1059,7 @@ function z_get_harmonic_groups_from_peak_list(element,brg,axis,strtag,remove_mat
                   number=machine.components[cn].map[element]
                 end
                 if math.abs(mtch.cn)==number and mtch.tag==strtag and mtch.type=='F' then
-                  if mtch.tag==stoptag then
-                    debugprint(stoptag)
-                  end
+
                   matchfound=true
                   local result = {}
                   if #pk.harm_pk_index>0 then 
@@ -1221,11 +1219,6 @@ function z_get_usual_tones_from_peak_list(element,brg,axis,sev_th,nr,sval_th)
           local so=pl[mia].peaks[indx].sord
           local pkis1x,x,rmdr =z_is_a_multiple(1,so,.005)
           pkis1x=pkis1x and x==1
-          --local x,rmdr = math.modf(so)      
-          --x=math.modf(x+round(rmdr))       
-          if pkis1x --[[x==1 and (rmdr<.02 or 1-rmdr<.02]] then 
-            freq1x=pl[mia].peaks[indx].sfreq
-          end
           local  mv=pl[mia].peaks[indx].mval
           if pl[mia].peaks[indx].aval~=nil then          
             local av=pl[mia].peaks[indx].aval
@@ -1328,12 +1321,13 @@ function z_get_sideband_groups_from_peak_list(element,brg,axis,remove_matches,se
 end
 --
 function z_sort_peak_info(pk_list,num_pks)
-  num=num_pks or 20
+  num_pks=num_pks or 20
   --ocal hs={}
   local function sort_items(a,b) return a.item>b.item end
   local sv={}
   local df={}
   local hs={}
+  local he={}
   local sevr={}
   local sbs={}
   local sbfsord={}
@@ -1442,7 +1436,7 @@ function z_sort_peak_info(pk_list,num_pks)
                 if dup then break end
                 local sgi=sbgi
                 if trouble_shoot then 
-                  d,_=string.find (sbgi,"]")
+                  local d,_=string.find (sbgi,"]")
                   sgi=string.sub (sbgi,2,d-1)
                 end
                 for ct,sbis in ipairs (pk_list[i].peaks[tonumber(sgi)].sidebands) do  -- sidebands freq groups of index from higher group index
@@ -1739,7 +1733,7 @@ function z_sort_peak_info(pk_list,num_pks)
       mi={peaklist=mi}
       --local luatoxml=require("luatoxml")
       local luatoxml=get_lua_to_xml()
-      xml = luatoxml.toxml(mi) 
+      local xml = luatoxml.toxml(mi) 
       if trouble_shoot then debugprint(xml) end
       return xml
     end  -- peak list empty
@@ -2303,6 +2297,7 @@ function z_sort_peak_info(pk_list,num_pks)
     local maxaxis=""
     local a,r,t=0,0,0
     local sfreq,rng,spd
+    local fmax
     if n==3 then  -- find possible outlier and remove from average
       for m,mia in ipairs (sr1xs) do
         if mia.found then
@@ -2319,6 +2314,7 @@ function z_sort_peak_info(pk_list,num_pks)
                   sfreq=inf.sfreq
                   rng=i
                   spd=mia.shaftspeed
+                  fmax=machine.datasets[inf.dsi].fmax
                 end
               end
             end
@@ -2478,7 +2474,7 @@ function z_sort_peak_info(pk_list,num_pks)
     for _,sp in ipairs(speeds) do
       local bin=(sp/g_peak_list[miaindx].shaftspeed)/((machine.datasets[ds].fmax/#machine.datasets[ds].data)/machine.datasets[ds].speed)+1
       local pks={}
-      last=machine.datasets[ds].peaks[#machine.datasets[ds].peaks]
+      local last=machine.datasets[ds].peaks[#machine.datasets[ds].peaks]
       if bin>last then
         table.insert(machine.datasets[ds].peaks,bin)
       elseif bin<last then

@@ -1,4 +1,4 @@
-﻿-- functions.lua    Rev 61 12/6/18
+﻿-- functions.lua    Rev 62 12/10/18
 
 -- rev 58 fixed initialize to run without errors if no average data is present so new machines will normalize DY
 
@@ -610,7 +610,7 @@ function initialize_data( norm )
     -- ,["typ"]="normal"
     if ds.dom=="spec" then
       -- Check that the data is in the correct unit
-      -- Demod data is non-dimentional.  Don't change that data.
+      -- Demod data is non-dimensional.  Don't change that data.
       if ds.typ=="normal" or
       ds.typ=="average" then
         ds.data = ConvertSpectrum( data_unit, g_internal_unit, ds.data )
@@ -741,8 +741,10 @@ function initialize_data( norm )
   local dq_warnings=data_quality()
   -----------------------------------------------------------------
   local sr1xs=norm( sdgs ) -- normalize the data
-  ------------------------------------------------------------------
-  dq_warnings=normalization_quality(dq_warnings)
+  ------------------------------------------------------------------   
+-- REVIEW: What is sr1xs?  Driver speed I think.  This changed the behavior of the normalize function
+--         which will break if other implementations, such as normalize0 are used.
+  dq_warnings=normalization_quality(dq_warnings,sr1xs)
     ------------------------------------------------------------------
 
   ------------------------------------------------------------------
@@ -2911,7 +2913,7 @@ end
 -- example:
 --      local ele = get_element( index )
 --
--- The calilng signiture with the ei_list parameter is ment for use only by this function.
+-- The calling signiture with the ei_list parameter is ment for use only by this function.
 --
 function get_data_shaft_speed( shaft_data_index, axis )
   local s  = safe_value_1( machine.components[g_shaft_number], M_SHAFT_INDEX, g_shaft_number )
@@ -3472,7 +3474,7 @@ end
             local sv=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[pk].sval)
             local  mv=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[pk].mval)
             local flag=pl.peaks[pk].flags or '-'
-            if not((string.match(flag,'m')~=nil or string.match(flag,'l')~=nil or string.match(flag,'f')~=nil or string.match(flag,'x')~=nil ) and  remove_matches) then  
+            if not((string.match(flag,'m')~=nil or string.match(flag,'l')~=nil or string.match(flag,'f')~=nil or string.match(flag,'x')~=nil ) and  remove_matches) or not(remove_matches) then  
               if pl.peaks[pk].aval~=nil then          
                 local av=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[pk].aval)
                 table.insert(harm_info,{pk_index=pk,sord=so, sval=sv, dif=sv-av, aval=av, mval=mv, mdif=sv-mv, sbin=pl.peaks[pk].sbin,sfreq=pl.peaks[pk].sfreq,mpct=pl.peaks[pk].mpct,pct=pl.peaks[pk].pct})
@@ -3513,8 +3515,8 @@ end
               if order > max_order then max_order = order end
               local s =ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),  pl.peaks[harm].sval)
               local m =ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[harm].mval)
+              if pl.peaks[harm].aval ~= nil then
               local a =ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[harm].aval)
-              if a~=nil then
                 table.insert( ret_matches, { 
                     ["order"] =order,
                     ["sval"] = s, 
@@ -3574,8 +3576,8 @@ end
                 if order> max_order then max_order = order end
                 local s =ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[tonumber(harm)].sval)
                 local m =ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[tonumber(harm)].mval)
+                if  pl.peaks[tonumber(harm)].aval~=nil then
                 local a =ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[tonumber(harm)].aval)
-                if a~=nil then
                   table.insert( ret_matches, { 
                       ["order"] = order,
                       ["sval"] = s, 
@@ -3617,79 +3619,8 @@ end
         result["matches"] = ret_matches
         result['found']=true
         return result
-      else --if tonumber(strtag)~=nil
-        local tagcheck=does_order_tag_exist(strtag,element)    
-        if tagcheck then
-          result["found"] = true
-          local ret_matches = {}
-          local max_order = 0      
-          for i,pk in pairs (pl.peaks) do
-            local matchfound=false
-            if #pk.matches>0 then
-              for _,mtch in ipairs (pk.matches) do
-                local number
-                if math.abs(mtch.cn)~=mtch.cn then
-                  number=cn
-                else
-                  number=machine.components[cn].map[element]
-                end
-                if math.abs(mtch.cn)==number and mtch.tag==strtag and mtch.type=='F' then
-                  matchfound=true
-                  local result = {}
-                  if #pk.harm_pk_index>0 then 
-                    for h,harm in ipairs(pk.harm_pk_index) do 
-                      local order=round(pl.peaks[tonumber(harm)].sord/pl.peaks[i].sord)
-                      if order>=1 then
-                        if order> max_order then max_order = order end
-                        local s = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[tonumber(harm)].sval)
-                        local m = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[tonumber(harm)].mval)
-                        local a = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[tonumber(harm)].aval)
-                        if a~=nil then
-                          table.insert( ret_matches, { 
-                              ["order"] = order,
-                              ["sval"] = s, 
-                              ["mval"] = m, 
-                              ["sord"] = pl.peaks[tonumber(harm)].sord, 
-                              ["sfreq"] = pl.peaks[tonumber(harm)].sfreq,
-                              ["sbin"] = pl.peaks[tonumber(harm)].sbin,
-                              ["sdsi"] = pl.peaks[tonumber(harm)].sdsi,
-                              ["aval"] = a, 
-                              ["aord"] = pl.peaks[tonumber(harm)].aord,
-                              ["abin"] = pl.peaks[tonumber(harm)].abin,
-                              ["adsi"] = pl.peaks[tonumber(harm)].adsi,
-                              ["dif"] = (s-a), 
-                              ["pct"] = pl.peaks[tonumber(harm)].pct,
-                              ["mdif"] = (s-m), 
-                              ["mpct"] = pl.peaks[tonumber(harm)].mpct
-                              } )
-                        else
-                          table.insert( ret_matches, { 
-                              ["order"] = order,
-                              ["sval"] = s, 
-                              ["mval"] = m, 
-                              ["sord"] = pl.peaks[tonumber(harm)].sord, 
-                              ["sfreq"] = pl.peaks[tonumber(harm)].sfreq,
-                              ["sbin"] = pl.peaks[tonumber(harm)].sbin,
-                              ["sdsi"] = pl.peaks[tonumber(harm)].sdsi,
-                              ["mdif"] = (s-m), 
-                              ["mpct"] =pl.peaks[tonumber(harm)].mpct
-                              } ) 
-                        end 
-                      end -- if order>1
-                    end --- for h,harm
-                    break
-                  end -- if #pk.harm_pk_index
-                end -- if mtch.cn==cn and mtch.tag==strtag and mtch.type=='F' 
-              end  -- for _,m
-              if matchfound then break end        
-            end -- if #pk.matches>0
-          end -- for i,pk 
-          result["orders"] = max_order
-          result["count"] = #ret_matches
-          result["matches"] = ret_matches
-          return result
-        end --if tonumber(strtag)~=nil
-      end  -- tag found
+      end
+
     elseif strtag=='1X' then
       local max_order = 0 
       local ret_matches,result = {},{}        
@@ -3704,8 +3635,8 @@ end
                 if order> max_order then max_order = order end
                 local s = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[tonumber(harm)].sval)
                 local m = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[tonumber(harm)].mval)
-                local a = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[tonumber(harm)].aval)
-                if a~=nil then
+                if pl.peaks[tonumber(harm)].aval~=nil then
+                  local a = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[tonumber(harm)].aval)
                   table.insert( ret_matches, { 
                       ["order"] = order,
                       ["sval"] = s, 
@@ -3742,12 +3673,87 @@ end
             end --- for h,harm
           end -- if #harms
         end
-      end -- if harms~=nil
-      result["orders"] = max_order
-      result["count"] = #ret_matches
-      result["matches"] = ret_matches
-      result['found']=true
-      return result
+        end -- if harms~=nil
+        result["orders"] = max_order
+        result["count"] = #ret_matches
+        result["matches"] = ret_matches
+        result['found']=true
+        return result
+      else --if tonumber(strtag)~=nil
+        local tagcheck=does_order_tag_exist(strtag,element)    
+        if tagcheck then
+          result["found"] = true
+          local ret_matches = {}
+          local max_order = 0      
+          for i,pk in pairs (pl.peaks) do
+            local matchfound=false
+            if #pk.matches>0 then
+              for _,mtch in ipairs (pk.matches) do
+                local number
+                if math.abs(mtch.cn)~=mtch.cn then
+                  number=cn
+                else
+                  number=machine.components[cn].map[element]
+                end
+                if math.abs(mtch.cn)==number and mtch.tag==strtag and mtch.type=='F' then
+                  matchfound=true
+                  local result = {}
+                  if #pk.harm_pk_index>0 then 
+                    for h,harm in ipairs(pk.harm_pk_index) do 
+                      local order=round(pl.peaks[tonumber(harm)].sord/pl.peaks[i].sord)
+                      if order>=1 then
+                        if order> max_order then max_order = order end
+                        local s = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[tonumber(harm)].sval)
+                        local m = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[tonumber(harm)].mval)
+                      if pl.peaks[tonumber(harm)].aval~=nil then 
+                        local a = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[tonumber(harm)].aval)
+                          table.insert( ret_matches, { 
+                              ["order"] = order,
+                              ["sval"] = s, 
+                              ["mval"] = m, 
+                              ["sord"] = pl.peaks[tonumber(harm)].sord, 
+                              ["sfreq"] = pl.peaks[tonumber(harm)].sfreq,
+                              ["sbin"] = pl.peaks[tonumber(harm)].sbin,
+                              ["sdsi"] = pl.peaks[tonumber(harm)].sdsi,
+                              ["aval"] = a, 
+                              ["aord"] = pl.peaks[tonumber(harm)].aord,
+                              ["abin"] = pl.peaks[tonumber(harm)].abin,
+                              ["adsi"] = pl.peaks[tonumber(harm)].adsi,
+                              ["dif"] = (s-a), 
+                              ["pct"] = pl.peaks[tonumber(harm)].pct,
+                              ["mdif"] = (s-m), 
+                            ["mpct"] = pl.peaks[tonumber(harm)].mpct,
+                      ['matches']=pl.peaks[tonumber(harm)].matches
+                              } )
+                        else
+                          table.insert( ret_matches, { 
+                              ["order"] = order,
+                              ["sval"] = s, 
+                              ["mval"] = m, 
+                              ["sord"] = pl.peaks[tonumber(harm)].sord, 
+                              ["sfreq"] = pl.peaks[tonumber(harm)].sfreq,
+                              ["sbin"] = pl.peaks[tonumber(harm)].sbin,
+                              ["sdsi"] = pl.peaks[tonumber(harm)].sdsi,
+                              ["mdif"] = (s-m), 
+                            ["mpct"] = pl.peaks[tonumber(harm)].mpct,
+                      ['matches']=pl.peaks[tonumber(harm)].matches
+                              } ) 
+                        end 
+                      end -- if order>1
+                    end --- for h,harm
+                    break
+                  end -- if #pk.harm_pk_index
+                end -- if mtch.cn==cn and mtch.tag==strtag and mtch.type=='F' 
+              end  -- for _,m
+              if matchfound then break end        
+            end -- if #pk.matches>0
+          end -- for i,pk 
+          result["orders"] = max_order
+          result["count"] = #ret_matches
+          result["matches"] = ret_matches
+          return result
+      --end --if tonumber(strtag)~=nil
+      end  -- tag found
     end -- if strtag==""
     return {found=false}
   end
@@ -3771,7 +3777,10 @@ function get_harmonics( shaft_data_index, axis, remove_matches, severity_thresho
           local  mv=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[pk].mval)
         local flag=pl.peaks[pk].flags or '-'
         if remove_matches and string.match(flag,'m')==nil and string.match(flag,'l')==nil and string.match(flag,'f')==nil and string.match(flag,'x')==nil then  
-            local av =ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[pk].aval)
+          local av = nil
+          if pl.peaks[pk].aval~=nil then
+            av=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), pl.peaks[pk].aval)
+          end
           local dv = nil
           if av then dv = sv-av end
           table.insert(harm_info,
@@ -3967,8 +3976,11 @@ end
             maxamp=sv
             maxampindex=sbi
           end
-          local av=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[sbi].aval)
-          local  mv=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[sbi].mval)
+        local av,mv
+        if pl.peaks[sbi].aval~=nil then
+          av=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[sbi].aval)
+        end
+        mv=ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id),pl.peaks[sbi].mval)
           local flag=pl.peaks[sbi].flags or '-'
           if not((string.match(flag,'m')~=nil or string.match(flag,'l')~=nil or string.match(flag,'f')~=nil or string.match(flag,'x')~=nil ) and  remove_matches) then   
             if av~=nil then
