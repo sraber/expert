@@ -1,4 +1,4 @@
-﻿-- functions.lua    Rev 64 12/11/18
+﻿-- functions.lua    Rev 65 12/14/18
 
 -- rev 58 fixed initialize to run without errors if no average data is present so new machines will normalize DY
 
@@ -853,6 +853,12 @@ function initialize_data( norm )
       -- Update sord and order in normal and demod peak lists, and add average info to normal peaks     
       for typ,axes in pairs(e.data.spec.cpl) do
         for ax, pl in pairs(axes) do
+          pl['shaftspeed']={}
+          if #pl.peaks==0 and e.data.spec.normal[ax][1]~=nil then
+            pl['shaftspeed']['ave']=machine.datasets[e.data.spec.normal[ax][1]].speed
+          elseif #pl.peaks==0 and e.data.spec.normal[ax][1]==nil then
+            pl['shaftspeed']['ave']=machine.speed
+          end
           for _,pk in ipairs(pl.peaks) do
             pl['shaftspeed']={[pk.sdsi]=machine.datasets[pk.sdsi].speed} -- save shafts speeds at the axis levels
             if typ=="normal" or typ=="demod" then  
@@ -3893,8 +3899,8 @@ function analyze_harmonic_by_tag_cpl( tag, shaft_tag_index, shaft_data_index, ax
           local mr = pl.peaks[harm].mval
           local s = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), sr )
           local m = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), mr )
-          if a~=nil then
             local ar = pl.peaks[harm].aval
+            if ar~=nil then
             local a = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ar )
             table.insert( ret_matches, { 
                 ["order"] = order,
