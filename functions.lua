@@ -1,4 +1,4 @@
-﻿-- functions.lua    Rev 62 12/10/18
+﻿-- functions.lua    Rev 64 12/11/18
 
 -- rev 58 fixed initialize to run without errors if no average data is present so new machines will normalize DY
 
@@ -463,7 +463,29 @@ local function make_composite_peak_table( tdsi,aves )
               --s=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , s )
               m=ds_spline_avg( ds, bin )
               --m=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , m )
-                  table.insert( comp_peaks, {sbin=bin,sdsi=dsi,sfreq=freq,sord=ord,pk_index=idx,flags=flags,matches={},sval=s,mval=m,mdif=s-m ,mpct=((s-m)/m), sb_severity={} , sb_energy={} , harm_energy=0 , harm_severity=0 , sidebands={} , subharmonics={} , harm_pk_index={} ,elsewhere={},fmax=ds.fmax ,order=round(ord,2)})
+                  table.insert( comp_peaks, {
+                      sbin=bin,
+                      sdsi=dsi,
+                      sfreq=freq,
+                      sord=ord,
+                      pk_index=idx,
+                      flags=flags,
+                      matches={},
+                      sval=s,
+                      mval=m,
+                      mdif=s-m ,
+                      mpct=((s-m)/m), 
+                      sb_severity={} , 
+                      sb_energy={} , 
+                      harm_energy=0 , 
+                      harm_severity=0 , 
+                      sidebands={} , 
+                      subharmonics={} , 
+                      harm_pk_index={} ,
+                      elsewhere={},
+                      fmax=ds.fmax ,
+                      order=round(ord,2)
+                      })
                 end
               end
             end
@@ -1435,7 +1457,8 @@ function put_store_value( tag, value )
   ssto[tag] = value
 end
 
-function increment_store_counter( tag )
+function increment_store_counter( tag, value )
+  value = value or 1
   local check,count = get_store_value(tag)
   if check==true then
     count = count + 1
@@ -2909,11 +2932,7 @@ end
 -- Use this function to get the best estimate of the current shaft speed in Hz
 -- based on the data.  It uses the composite data "shaftspeed.avg" of the pickup
 -- location.  It considers the actual pickup location, which may be different than
--- the 
--- example:
---      local ele = get_element( index )
---
--- The calling signiture with the ei_list parameter is ment for use only by this function.
+-- the input pickup.
 --
 function get_data_shaft_speed( shaft_data_index, axis )
   local s  = safe_value_1( machine.components[g_shaft_number], M_SHAFT_INDEX, g_shaft_number )
@@ -2993,137 +3012,145 @@ end
 --                value : the amplitude of the spectrum at the order.  This will be a peak value as peak polishing was used to find the position.
 --                mval  : the amplitude of the spectrum moving average (the signal noise floor).
 --
-  function find_tag_info( tag, shaft_tag_index, shaft_data_index, axis, composite_shaft_index )
-    local ei = safe_value_1( machine.components[g_shaft_number].map[shaft_data_index], M_SHAFT_DATA_INDEX, shaft_data_index ) -- The index of the element that is a data pcikup
-    local ti
-    local spec
-    -- Example data layout
-    -- spec={
-    --    normal={ r={7,13},a={8,14},t={9,15} },       : The numbers are data set indexes.  
-    --    average={ r={19,31}, a={20,32}, t={21,33} }  : They could be high and low range data but we do not know here.
-    --    }
+function find_tag_info( tag, shaft_tag_index, shaft_data_index, axis, composite_shaft_index )
+  local ei = safe_value_1( machine.components[g_shaft_number].map[shaft_data_index], M_SHAFT_DATA_INDEX, shaft_data_index ) -- The index of the element that is a data pcikup
+  local ti
+  local spec
+  -- Example data layout
+  -- spec={
+  --    normal={ r={7,13},a={8,14},t={9,15} },       : The numbers are data set indexes.  
+  --    average={ r={19,31}, a={20,32}, t={21,33} }  : They could be high and low range data but we do not know here.
+  --    }
 
-    if tag=="LF" or tag=="2XLF" then
-      local ai = get_element_alias( ei )
-      ti = ai
-      local ele = machine.elements[ai]
-      spec = safe_value_3( ele.data.spec, M_DATA, "spec", "normal", axis )
-    else
-      ti = check_get_order_tag_index(tag, shaft_tag_index, composite_shaft_index )
-      spec = safe_value_3( get_element(ei).data.spec, M_DATA, "spec", "normal", axis )
-    end
+  if tag=="LF" or tag=="2XLF" then
+    local ai = get_element_alias( ei )
+    ti = ai
+    local ele = machine.elements[ai]
+    spec = safe_value_3( ele.data.spec, M_DATA, "spec", "normal", axis )
+  else
+    ti = check_get_order_tag_index(tag, shaft_tag_index, composite_shaft_index )
+    spec = safe_value_3( get_element(ei).data.spec, M_DATA, "spec", "normal", axis )
+  end
 
-    local dom = safe_value_3( spec["normal"], M_DATA, "spec", "normal", axis )
-    local ni = safe_value_3( dom[axis], M_DATA, "spec", "normal", axis )
-    local mdi = 0
-    local bws = 10000
-    local lbw = bws
-    local tag_match = nil
+  local dom = safe_value_3( spec["normal"], M_DATA, "spec", "normal", axis )
+  local ni = safe_value_3( dom[axis], M_DATA, "spec", "normal", axis )
+  local mdi = 0
+  local bws = 10000
+  local lbw = bws
+  local tag_match = nil
 
-    -- matches format: (type, tag, ei, bin)
-    --    type  - F = fundemental, H = harmonic, S = sideband
-    --    tag   - Forcing Order tag
-    --    ei    - machine element index
-    --    bin   - bin position of peak in the data.  A real number and will be fractional.
-    --    order - for type H only.  The order of the harmonic.
-    mdi = 0
-    for _,di in ipairs(ni) do
-      local ds = machine.datasets[di]
-      local m = find_tag_in_matches( tag, ti, ds.matches )
-      if m~=nil then
-        if ds.bw < lbw then
-          lbw = ds.bw
-          mdi = di
-          tag_match = m
-        end
+  -- matches format: (type, tag, ei, bin)
+  --    type  - F = fundemental, H = harmonic, S = sideband
+  --    tag   - Forcing Order tag
+  --    ei    - machine element index
+  --    bin   - bin position of peak in the data.  A real number and will be fractional.
+  --    order - for type H only.  The order of the harmonic.
+  mdi = 0
+  for _,di in ipairs(ni) do
+    local ds = machine.datasets[di]
+    local m = find_tag_in_matches( tag, ti, ds.matches )
+    if m~=nil then
+      if ds.bw < lbw then
+        lbw = ds.bw
+        mdi = di
+        tag_match = m
       end
     end
+  end
 
-    if mdi==0 then return {["found"]=false} end
-    local ds = machine.datasets[mdi]
+  if mdi==0 then return {["found"]=false} end
+  local ds = machine.datasets[mdi]
 
-    --local val = ds_spline_value( ds, tag_match.bin )
-    --val = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), val )
-    --return { ["found"] = true, ["match"] = tag_match, ["dsi"] = mdi, ["order"] = (tag_match.bin * lbw / ds.speed), ["value"] = val }
-    return { ["found"] = true, ["match"] = tag_match, ["dsi"] = mdi, ["order"] = ((tag_match.bin-1) * lbw / ds.speed), ["freq"] = (tag_match.bin-1) * lbw, ["bin"] = tag_match.bin, ["value"] = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ds_spline_value( ds, tag_match.bin ) ), ["mval"] = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ds_spline_avg( ds, tag_match.bin ) ) }
-
+  --local val = ds_spline_value( ds, tag_match.bin )
+  --val = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), val )
+  --return { ["found"] = true, ["match"] = tag_match, ["dsi"] = mdi, ["order"] = (tag_match.bin * lbw / ds.speed), ["value"] = val }
+  return { ["found"] = true, ["match"] = tag_match, ["dsi"] = mdi, ["order"] = ((tag_match.bin-1) * lbw / ds.speed), ["freq"] = (tag_match.bin-1) * lbw, ["bin"] = tag_match.bin, ["value"] = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ds_spline_value( ds, tag_match.bin ) ), ["mval"] = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ds_spline_avg( ds, tag_match.bin ) ) }
 end
 
-  function find_tag_info_cpl( tag, shaft_tag_index, shaft_data_index, axis, composite_shaft_index )
-    local ei = safe_value_1( machine.components[g_shaft_number].map[shaft_data_index], M_SHAFT_DATA_INDEX, shaft_data_index ) -- The index of the element that is a data pcikup
-    local ti
-    local spec
-    -- Example data layout
-    -- spec={
-    --    normal={ r={7,13},a={8,14},t={9,15} },       : The numbers are data set indexes.  
-    --    average={ r={19,31}, a={20,32}, t={21,33} }  : They could be high and low range data but we do not know here.
-    --    }
+function find_tag_info_cpl( tag, shaft_tag_index, shaft_data_index, axis, composite_shaft_index )
+  local ei = safe_value_1( machine.components[g_shaft_number].map[shaft_data_index], M_SHAFT_DATA_INDEX, shaft_data_index ) -- The index of the element that is a data pcikup
+  local ti
+  local pks
+  -- Example data layout
+  -- spec={
+  --    normal={ r={7,13},a={8,14},t={9,15} },       : The numbers are data set indexes.  
+  --    average={ r={19,31}, a={20,32}, t={21,33} }  : They could be high and low range data but we do not know here.
+  --    }
 
-    if tag=="LF" or tag=="2XLF" then
-      local ai = get_element_alias( ei )
-      ti = ai
-      local ele = machine.elements[ai]
-      spec = safe_value_3( ele.data.spec, M_DATA, "spec", "normal", axis )
-    else
-      ti = check_get_order_tag_index(tag, shaft_tag_index, composite_shaft_index )
-      spec = safe_value_3( get_element(ei).data.spec, M_DATA, "spec", "normal", axis )
-    end
-
-    local cpl = safe_value_3( spec["cpl"], M_DATA, "spec", "cpl", axis )
-    local dom = safe_value_3( cpl["normal"], M_DATA, "cpl", "normal", axis )
-    local pks = safe_value_3( dom[axis], M_DATA, "cpl", "normal", axis )
-    local peak = nil
-    local tag_match = nil
-    -- peak format:
-    --    aval
-    --    aord
-    --    abin
-    --    afreq
-    --    adsi
-    --    sval
-    --    sord
-    --    sbin
-    --    sfreq
-    --    sdsi
-    --    dif
-    --    pct
-    --    mval
-    --    mdif
-    --    mpct
-    --    fmax
-    --    order
-    --    sev
-    --    matches
-    --
-    -- matches format: (type, tag, ei, bin)
-    --    type  - F = fundemental, H = harmonic, S = sideband
-    --    tag   - Forcing Order tag
-    --    ei    - machine element index
-    --    bin   - bin position of peak in the data.  A real number and will be fractional.
-    --    order - for type H only.  The order of the harmonic.
-    for _,p in ipairs(pks.peaks) do
-      peak = p
-      tag_match = find_tag_in_matches( tag, ti, p.matches )
-      if tag_match then break end
-    end
-    
-    if tag_match==nil then
-      return {["found"]=false}
-    end
-    
-    local ds = machine.datasets[peak.sdsi]
-    return { 
-      ["found"] = true, 
-      ["match"] = tag_match, 
-      ["dsi"]   = peak.sdsi, 
-      ["order"] = peak.sord, 
-      ["freq"]  = peak.sfreq, 
-      ["bin"]   = tag_match.bin, 
-      ["value"] = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ds_spline_value( ds, tag_match.bin ) ), 
-      ["mval"]  = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ds_spline_avg( ds, tag_match.bin ) ) 
-      }
-
+  if tag=="LF" or tag=="2XLF" then
+    local ai = get_element_alias( ei )
+    ti = ai
+    pks = safe_spec_cpl( machine.elements[ai], "normal", axis )
+  else
+    ti = check_get_order_tag_index(tag, shaft_tag_index, composite_shaft_index )
+    pks = safe_spec_cpl( get_element(ei), "normal", axis )
   end
+
+  local peak = nil
+  local tag_match = nil
+  -- peak format:
+  --    aval
+  --    aord
+  --    abin
+  --    afreq
+  --    adsi
+  --    sval
+  --    sord
+  --    sbin
+  --    sfreq
+  --    sdsi
+  --    dif    s-a
+  --    pct
+  --    mval
+  --    mdif   s-m
+  --    mpct
+  --    fmax
+  --    order
+  --    sev
+  --    matches
+  --
+  -- matches format: (type, tag, ei, bin)
+  --    type  - F = fundemental, H = harmonic, S = sideband
+  --    tag   - Forcing Order tag
+  --    ei    - machine element index
+  --    bin   - bin position of peak in the data.  A real number and will be fractional.
+  --    order - for type H only.  The order of the harmonic.
+  for _,p in ipairs(pks.peaks) do
+    peak = p
+    tag_match = find_tag_in_matches( tag, ti, p.matches )
+    if tag_match then break end
+  end
+  
+  if tag_match==nil then
+    return {["found"]=false}
+  end
+  
+  -- Copy all the scalar values of the composite peak
+  local ret = {}
+  for orig_key, orig_value in pairs(peak) do
+    if type(orig_value)~='table' then
+      ret[orig_key] = orig_value
+    end
+  end
+  
+  ret.sval = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ret.sval )
+  ret.mval = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ret.mval )
+  ret.mdif = ret.sval - ret.mval
+  if ret.aval then
+    ret.aval = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ret.aval )
+    ret.dif = ret.sval - ret.aval
+  end
+  
+  -- Add the matches table to the return value.
+  local ret_matches = {}
+  for orig_key, orig_value in pairs(peak.matches) do
+    ret_matches[orig_key] = orig_value
+  end
+  ret.matches = ret_matches
+  
+  ret.found = true
+  return ret
+end
 
 -- find_tag_harmonic_info
 -- Notes:
@@ -3298,25 +3325,15 @@ end
 --                mpct  : percent difference between sval and mval
 --
   function analyze_by_tag( tag, shaft_tag_index, shaft_data_index, axis, polish_avg_peak, composite_shaft_index )  
-    polish_avg_peak = polish_avg_peak or (true)
-    --local r1 = find_tag_info( tag, shaft_tag_index, shaft_data_index, axis, composite_shaft_index )
+    -- REVIEW: polish_avg_peak is diminished.  Remove from calling signiture.
     local r1 = find_tag_info_cpl( tag, shaft_tag_index, shaft_data_index, axis, composite_shaft_index )
     if r1.found==false then return { ["found"]=false } end
-    local r2 = find_order_info( r1.order, shaft_data_index, "average", axis )
-    if r2.found==false then
-      r2 = get_order_info( r1.order, shaft_data_index, "average", axis, polish_avg_peak ) 
-    end
-
-    local s = r1.value
-    local m = r1.mval
-    local a = r2.value
-
-    return { ["found"]=true, 
-      ['sval'] = s, ["sord"] = r1.order, ["sfreq"] = r1.freq, ["sbin"] = r1.bin, ["sdsi"] = r1.dsi, 
-      ['mval'] = m, ["mdif"] = (s-m), ["mpct"] = ((s-m)/m),
-      ["aval"] = a, ["aord"] = r2.order, ["abin"] = r2.bin, ["adsi"] = r2.dsi, 
-      ["dif"] = (s-a), ["pct"] = ( (s-a)/a ) 
-    }
+    -- REVIEW: This is not deterministic.  If there is normal data but no average data
+    --         AND the match is not found in the normal data then this call will succeed.
+    --         BUT if a match is found, there is no average data to complete the analysis
+    --         and this call will fail and call assert.
+    safe_value_3( r1.aval, M_DATA, "spec", "average", axis )
+    return r1
   end
 
 -- analyze_harmonic_by_tag
@@ -3762,8 +3779,7 @@ end
 function get_harmonics( shaft_data_index, axis, remove_matches, severity_threshold )  
   remove_matches=remove_matches or false
   severity_threshold=severity_threshold or 0
-  local ele = get_element(shaft_data_index)
-  local pl=ele.data.spec.cpl.normal[axis]
+  local pl = safe_spec_cpl( get_element(shaft_data_index), "normal", axis )
   local harm_info={}
   local harms={}
 
@@ -3848,9 +3864,9 @@ end
 function analyze_harmonic_by_tag_cpl( tag, shaft_tag_index, shaft_data_index, axis )  
   local element = shaft_tag_index
   local brg = shaft_data_index
-  local strtag=string.upper(tag)    
+  local strtag=string.upper(tag)
   local ele = get_element(brg)
-  local pl=ele.data.spec.cpl.normal[axis]
+  local pl = safe_spec_cpl( ele, "normal", axis )
   local shaftspeed=ele.speedratio
   --local harm_info={}
   local harms={}
@@ -3875,11 +3891,11 @@ function analyze_harmonic_by_tag_cpl( tag, shaft_tag_index, shaft_data_index, ax
           if order> max_order then max_order = order end
           local sr = pl.peaks[harm].sval
           local mr = pl.peaks[harm].mval
-          local ar = pl.peaks[harm].aval
           local s = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), sr )
           local m = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), mr )
-          local a = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ar )
           if a~=nil then
+            local ar = pl.peaks[harm].aval
+            local a = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ar )
             table.insert( ret_matches, { 
                 ["order"] = order,
                 ["sval"]  = s, 

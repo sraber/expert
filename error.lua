@@ -1,4 +1,4 @@
--- error.lua    Rev 2     2/28/18
+-- error.lua    Rev 3     12/13/18
 -------------------------------------------------------------------------
 --     Error Codes
 E_SHAFT_TAG_INDEX   = 1
@@ -119,3 +119,33 @@ function safe_value_4( test_value, error_formatter, error_formatter_input1, erro
   return test_value
 end
 
+function safe_spec_cpl( ele, typ, axis )
+  local dom = "spec"
+  local level = 3
+  local function safe_key( tbl, key )
+    level = level + 1
+    if tbl==nil or type(tbl)~='table' then error( M_PARAM_ARG( "Key value: "..key.."not acting on a table.", level) ) end
+    local val = tbl[key]
+    if val == nil then
+      error( M_DATA(dom,typ,axis,level) )
+    end
+    return val
+  end
+  return safe_key( safe_key( safe_key( safe_key( safe_key(ele, "data"), "spec") , "cpl"), typ), axis )
+end
+
+function safe_spec( ele, typ, axis )
+  local dom = "spec"
+  local level = 3
+  local function safe_key( tbl, key )
+    level = level + 1
+    if tbl==nil or type(tbl)~='table' then error( M_PARAM_ARG( "Key value: "..key.."not acting on a table.", level) ) end
+    local val = tbl[key]
+    if val == nil then
+      error( M_DATA(dom,typ,axis,level) )
+    end
+    return val
+  end
+  return safe_key( safe_key( safe_key( safe_key(ele, "data"), "spec") , typ), axis )
+end
+  
