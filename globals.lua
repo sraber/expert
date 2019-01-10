@@ -127,6 +127,3 @@ g_fault_tone_threshold = 10 -- any tone over with dif  greater than this is adde
 
 g_significance_threshold = 70 -- amplitiude theshold for low dif (>3)peaks
 
-function reinit_globals()
-  
-end
