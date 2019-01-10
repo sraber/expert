@@ -1,7 +1,7 @@
-﻿-- functions.lua    Rev 65 12/14/18
+﻿-- functions.lua    Rev 67 1/9/19
 
--- rev 58 fixed initialize to run without errors if no average data is present so new machines will normalize DY
-
+-- This is set in the do_xxx_analysis functions and used by get_infer_solution.
+local l_fault_analysis
 --------------------------------------------------------------------------
 --  ***************    Rule Managment  ***********************
 -- REVIEW: There's more to do here.
@@ -47,6 +47,7 @@ end
 --******************* End Rule Management *************************
 --------------------------------------------------------------------------
 function do_fault_analysis( fault_table, fault_ex_table )
+    l_fault_analysis = 1
   -- g_faults_or_recs is used by a number of functions below.  These are functions
   -- that we want to act on either the fault table or the recommendation table
   -- in the same way.  So we coded them to act on the global variable g_fautls_or_recs
@@ -72,11 +73,12 @@ function do_fault_analysis( fault_table, fault_ex_table )
 
   g_infer_solution = fault_ex_table
 
-  -- l_fault_rules - a local table.
+  -- l_fault_rules - This is a table local to this file.  See the Rule Managment section.
   return l_fault_rules
 end
 
 function do_rec_analysis( rec_table, rec_ex_table )
+    l_fault_analysis = 0
   -- g_faults_or_recs is used by a number of functions below.  These are functions
   -- that we want to act on either the fault table or the recommendation table
   -- in the same way.  So we coded them to act on the global variable g_fautls_or_recs
@@ -91,8 +93,6 @@ function do_rec_analysis( rec_table, rec_ex_table )
 
   g_infer_solution = nil
   g_infer_solution = rec_ex_table
-
-  g_peak_list = {}
 
   return l_rec_rules
 end
@@ -180,14 +180,14 @@ function z_get_ci_from_mi(mi)
 end
 
 function z_get_data_source_mi_from_ci(ci,brg)
-  local map=machine.components[ci].map[brg]
-  return get_element_alias(map)
+  local ei=machine.components[ci].map[brg]
+  return get_machine_element_alias(ei)
 end
 
 function z_get_brg_and_data_set_speed_ratio(element,brg)
   local cn=get_this_comp_number()
   local brgmi = machine.components[cn].map[brg]
-  local aliasmi = get_element_alias(brgmi)
+  local aliasmi = get_machine_element_alias(brgmi)
 
   -- REVIEW: What's the point of this?  g_shaft_number is what is output from get_this_comp_number,
   --         so same as cn here.  If brg is 1 then same result as above.
@@ -245,38 +245,77 @@ function debugprint (...)  -- prints only if g_no_printing is false
 end 
 
 -- 
--- get_element
--- Use this function to get an element given an element index ONLY when needed for access to data.
--- This function will follow the input element index to the alias element index.  It will handle
--- an alias pointing to another alias.  Other functions should call this function without ei_list,
--- example:
---      local ele = get_element( index )
+-- get_machine_element
+-- Notes:
+--    Use this function to get an element given a machine element index.
+--    This function will follow the input machine element's alias index to the next element.  It will handle
+--    an alias pointing to another alias.  Other functions should call this function without ei_list,
+--    example:
+--        local ele = get_machine_element( machine_index )
 --
--- The calilng signiture with the ei_list parameter is ment for use only by this function.
+--    The calilng signiture with the mi_list parameter is ment for use only by this function.
 --
-function get_element( ei, ei_list )
-  if ei_list==nil then ei_list={} end
-  ei_list[ei]=true
-  local ele = machine.elements[ei]
-  if ele==nil then error( M_PARAM_ARG( "Element index "..ei.." does not exist" ) ) end
+-- Input:
+--    machine_index - A machine class level index.
+-- Return:
+--    Returns a machine element from the machine.elements table.
+--
+function get_machine_element( machine_index, mi_list )
+  if mi_list==nil then mi_list={} end
+  mi_list[machine_index]=true
+  local ele = machine.elements[machine_index]
+  if ele==nil then error( M_PARAM_ARG( "Element index "..machine_index.." does not exist" ) ) end
   local alias = ele.alias
   if alias~=nil and alias>0 then
-    if ei_list[alias]==true then error( M_PARAM_ARG( "Element alias index "..alias.." points to a previous index.  Circular reference." ) ) end
-    ele = get_element(alias, ei_list)
+    if mi_list[alias]==true then error( M_PARAM_ARG( "Machine element alias index "..alias.." points to a previous index.  Circular reference." ) ) end
+    ele = get_machine_element(alias, mi_list)
   end
   return ele
 end
 
-function get_element_alias( ei, ei_list )
-  if ei_list==nil then ei_list={} end
-  ei_list[ei]=true
-  local ret = ei
-  local ele = machine.elements[ei]
-  if ele==nil then error( M_PARAM_ARG( "Element index "..ei.." does not exist" ) ) end
+-- get_element
+-- Notes:
+--    Use this function to get an element given a shaft index when you want to follow the element alias.
+--    This function will follow the input shaft index to the alias element index.  It will handle
+--    an alias pointing to another alias.  
+--
+-- Input:
+--    machine_index - A machine class level index.
+-- Return:
+--    Returns a machine element from the machine.elements table.
+--
+function get_element( shaft_index )
+  local s  = safe_value_1( machine.components[g_shaft_number], M_SHAFT_INDEX, g_shaft_number )
+  local mi = safe_value_1( s.map[shaft_index], M_SHAFT_DATA_INDEX, shaft_index )
+  return get_machine_element( mi )
+end
+
+-- 
+-- get_machine_element_alias
+-- Notes:
+--    Use this function to get a machine index at the end of a chain of alias indexes.
+--    This function will follow the input machine element's alias index to the next element.  It will handle
+--    an alias pointing to another alias.  Other functions should call this function without ei_list,
+--    example:
+--        local ele = get_machine_element( machine_index )
+--
+--    The calilng signiture with the mi_list parameter is ment for use only by this function.
+--
+-- Input:
+--    machine_index - A machine class level index.
+-- Return:
+--    Returns a machine element from the machine.elements table.
+--
+function get_machine_element_alias( mi, mi_list )
+  if mi_list==nil then mi_list={} end
+  mi_list[mi]=true
+  local ret = mi
+  local ele = machine.elements[mi]
+  if ele==nil then error( M_PARAM_ARG( "Element index "..mi.." does not exist" ) ) end
   local alias = ele.alias
   if alias~=nil and alias>0 then
-    if ei_list[alias]==true then error( M_PARAM_ARG( "Element alias index "..alias.." points to a previous index.  Circular reference." ) ) end
-    ret = get_element_alias(alias, ei_list)
+    if mi_list[alias]==true then error( M_PARAM_ARG( "Machine element alias index "..alias.." points to a previous index.  Circular reference." ) ) end
+    ret = get_machine_element_alias(alias, mi_list)
   end
   return ret
 end
@@ -1432,8 +1471,6 @@ function initialize_data( norm )
     end
   end
 
-  --g_peak_list=peak_list(sr1xs)  -- legency peak list, this line does not need to be in api
-
   for _,v in ipairs(rm_rulebase_info) do
     if v.lib.initialize then
       v.lib.initialize()
@@ -2103,12 +2140,11 @@ end
 
   local function as_add_peak( ft, st )
     if st.shaftdataindex==nil then return end
-    -- dataindex is relitive to the shft.  
     local cmp = machine.components[g_shaft_number]
     local dataindex = cmp.map[st.shaftdataindex]
     local rei
     if dataindex then
-      rei = get_element_alias(dataindex)
+      rei = get_machine_element_alias(dataindex)
       st.dataguid = machine.elements[dataindex].guid
     else
       rei = 'NAN'
@@ -2128,7 +2164,7 @@ end
     local dataindex = cmp.map[st.shaftdataindex]
     local rei
     if dataindex then
-      rei = get_element_alias(dataindex)
+      rei = get_machine_element_alias(dataindex)
       st.dataguid = machine.elements[dataindex].guid
     else
       rei = 'NAN'
@@ -2176,7 +2212,9 @@ end
     for n, t in pairs(g_infer_solution) do
       asn_comp( n, t, w )
     end
-    asn_peaklist( w )
+    if l_fault_analysis then
+      asn_peaklist( w )
+    end
 
     w.xml = w.xml .. '</root>'
     return w.xml
@@ -2186,14 +2224,14 @@ end
   function create_assert_support_peak(forcing_order_index, forcing_order_tag, data_index, axis, dsi, bin, order, freq, sval, aval, severity_weight, description )
     return { ["type"] = 1, -- Peak
       ["forcingorderindex"]=forcing_order_index,["shaftdataindex"]=data_index,["forcingordertag"]=forcing_order_tag,["axis"]=string.upper(axis),
-      ["datasourceindex"]=dsi, ["bin"]=bin,["order"]=order,["freq"]=freq,["sval"]=sval,["aval"]=aval,
+      ["datasourceindex"]=dsi, ["bin"]=bin,["order"]=order,["freq"]=freq,["sval"]=sval,["aval"]=aval,["eu"]=g_unit_id,
       ["severityweight"]=severity_weight,["description"]=description }
   end
 
   function create_assert_support_band(forcing_order_index, forcing_order_tag, data_index, axis, dsi, low_order, high_order, sval, aval, severity_weight, description )
     return { ["type"] = 2, -- Band
       ["forcingorderindex"]=forcing_order_index,["shaftdataindex"]=data_index,["forcingordertag"]=forcing_order_tag,["axis"]=string.upper(axis),
-      ["datasourceindex"]=dsi, ["loworder"]=low_order,["highorder"]=high_order,["sval"]=sval,["aval"]=aval,
+      ["datasourceindex"]=dsi, ["loworder"]=low_order,["highorder"]=high_order,["sval"]=sval,["aval"]=aval,["eu"]=g_unit_id,
       ["severityweight"]=severity_weight,["description"]=description }
   end
 
@@ -2265,7 +2303,7 @@ end
 --    It should always succeed.
 -- REVIEW:
 --     Could use an optional parameter: include_alias
---     If true then use get_element function with the ei parameter to get the 
+--     If true then use get_machine_element function with the ei parameter to get the 
 --     alias element.
 -- Input:
 --    shaft_data_index  : shaft index position of the data to analyse
@@ -2503,7 +2541,7 @@ end
     no_error = no_error or false
     local s  = safe_value_1( machine.components[g_shaft_number], M_SHAFT_INDEX, g_shaft_number )
     local ei = safe_value_1( s.map[shaft_data_index], M_SHAFT_DATA_INDEX, shaft_data_index )
-    local spec = safe_value_3( get_element(ei).data.spec, M_DATA, "spec", typ, axis )
+    local spec = safe_value_3( get_machine_element(ei).data.spec, M_DATA, "spec", typ, axis )
     local dom = safe_value_3( spec[typ], M_DATA, "spec", typ, axis )
     local ai = safe_value_3( dom[axis], M_DATA, "spec", typ, axis )
 
@@ -2943,7 +2981,7 @@ end
 function get_data_shaft_speed( shaft_data_index, axis )
   local s  = safe_value_1( machine.components[g_shaft_number], M_SHAFT_INDEX, g_shaft_number )
   local ele_data_index = safe_value_1( s.map[shaft_data_index], M_SHAFT_DATA_INDEX, shaft_data_index )
-  local ei = get_element_alias(ele_data_index) -- Data element.  May be an alias.
+  local ei = get_machine_element_alias(ele_data_index) -- Data element.  May be an alias.
   local e = machine.elements[ei]
   if e.data==nil or e.data.spec==nil or e.data.spec.cpl==nil or e.data.spec.cpl.normal==nil then
     error(M_DATA("spec","normal","composite"))
@@ -3029,13 +3067,12 @@ function find_tag_info( tag, shaft_tag_index, shaft_data_index, axis, composite_
   --    }
 
   if tag=="LF" or tag=="2XLF" then
-    local ai = get_element_alias( ei )
-    ti = ai
-    local ele = machine.elements[ai]
+    ti = get_machine_element_alias( ei )
+    local ele = machine.elements[ti]
     spec = safe_value_3( ele.data.spec, M_DATA, "spec", "normal", axis )
   else
     ti = check_get_order_tag_index(tag, shaft_tag_index, composite_shaft_index )
-    spec = safe_value_3( get_element(ei).data.spec, M_DATA, "spec", "normal", axis )
+    spec = safe_value_3( get_machine_element(ei).data.spec, M_DATA, "spec", "normal", axis )
   end
 
   local dom = safe_value_3( spec["normal"], M_DATA, "spec", "normal", axis )
@@ -3084,12 +3121,12 @@ function find_tag_info_cpl( tag, shaft_tag_index, shaft_data_index, axis, compos
   --    }
 
   if tag=="LF" or tag=="2XLF" then
-    local ai = get_element_alias( ei )
-    ti = ai
-    pks = safe_spec_cpl( machine.elements[ai], "normal", axis )
+    ti = get_machine_element_alias( ei )
+    pks = safe_spec_cpl( machine.elements[ti], "normal", axis )
   else
     ti = check_get_order_tag_index(tag, shaft_tag_index, composite_shaft_index )
-    pks = safe_spec_cpl( get_element(ei), "normal", axis )
+    local ele = get_machine_element(ei)
+    pks = safe_spec_cpl( ele, "normal", axis )
   end
 
   local peak = nil
@@ -3190,7 +3227,7 @@ end
     --    normal={ r={7,13},a={8,14},t={9,15} },       : The numbers are data set indexes.  
     --    average={ r={19,31}, a={20,32}, t={21,33} }  : They could be high and low range data but we do not know here.
     --    }
-    local spec = safe_value_3( get_element(ei).data.spec, M_DATA, "spec", "normal", axis )
+    local spec = safe_value_3( get_machine_element(ei).data.spec, M_DATA, "spec", "normal", axis )
     local dom = safe_value_3( spec["normal"], M_DATA, "spec", "normal", axis )
     local ni = safe_value_3( dom[axis], M_DATA, "spec", "normal", axis )
     local mdi = 0
@@ -3265,7 +3302,7 @@ end
     peak_polish = peak_polish or true 
     local s  = safe_value_1( machine.components[g_shaft_number], M_SHAFT_INDEX, g_shaft_number )
     local ei = safe_value_1( s.map[shaft_data_index], M_SHAFT_DATA_INDEX, shaft_data_index )
-    local spec = safe_value_3( get_element(ei).data.spec, M_DATA, "spec", "normal", axis )
+    local spec = safe_value_3( get_machine_element(ei).data.spec, M_DATA, "spec", "normal", axis )
     local dom = safe_value_3( spec["normal"], M_DATA, "spec", "normal", axis )
     local ai = safe_value_3( dom[axis], M_DATA, "spec", "normal", axis )
 
@@ -3952,7 +3989,8 @@ end
   function cross_talk(element,brg,axis,pk_index,key,ct_limit)
     ct_limit=ct_limit or 12
     if true then
-      local alias = get_element_alias(brg)
+      local mi = safe_value_1( machine.components[g_shaft_number].map[brg], M_SHAFT_DATA_INDEX, brg )
+      local alias = get_machine_element_alias(mi)
       local pk=machine.elements[alias].data.spec.cpl.normal[axis].peaks[pk_index]
       if pk.elsewhere[key]==nil then return false,0  end
       for _,ax in ipairs(pk.elsewhere[key]) do
@@ -3964,7 +4002,8 @@ end
 
 -- This function return a lists of tones  with significant sideband groups (1X for all shafts and LF) sorted sb severity
   function get_sideband_groups_from_cpl(element,brg,axis,remove_matches,sev_th,nr)
-    local alias = get_element_alias(brg)
+    local mi = safe_value_1( machine.components[g_shaft_number].map[brg], M_SHAFT_DATA_INDEX, brg )
+    local alias = get_machine_element_alias(mi)
     local pl=machine.elements[alias].data.spec.cpl.normal[axis]
     local shaftspeed=machine.elements[alias].speedratio
     remove_matches=remove_matches or false
@@ -4022,11 +4061,11 @@ end
 
 -- this function returns a list of tones sorted by amplitude that are not flagged as a multiple of shaft rate or LF, part of a signiticant harmonic of sideband series, or a match 
   function get_usual_tones_from_cpl(element,brg,axis,sev_th,nr,sval_th)
-    local alias = get_element_alias(brg)
+    local mi = safe_value_1( machine.components[g_shaft_number].map[brg], M_SHAFT_DATA_INDEX, brg )
+    local alias = get_machine_element_alias(mi)
     local pl=machine.elements[alias].data.spec.cpl.normal[axis]
     local shaftspeed=machine.elements[alias].speedratio
     --local pl={}
-    --table.move(g_peak_list,1,#g_peak_list,1,pl)
     sval_th=sval_th or 70
     sev_th=sev_th or 108
     nr=nr or 10

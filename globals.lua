@@ -1,4 +1,4 @@
--- include.lua    Rev 8     11/9/2018
+-- include.lua    Rev 9     1/9/19
 
 vds_core_name ='Standard Lib'
 vds_core_id = '23C66D33-CC90-43A3-827A-EE0F983DE649'
@@ -111,10 +111,6 @@ g_std_multiply =0
 -- the higher the threshold for a peak to be considered.
 g_mean_multiply = 2
 
--- REVIEW: Need to research why this is here.  Is this a working array for
---         the peak_list code?
-g_peak_list ={} -- The composite peak list
-
 -- REVIEW: Still needed?
 g_peak_list_xml=""  
 
@@ -130,3 +126,7 @@ g_fault_tones_xml=""
 g_fault_tone_threshold = 10 -- any tone over with dif  greater than this is added to fault severity and the fault tone list no matter the amplitude
 
 g_significance_threshold = 70 -- amplitiude theshold for low dif (>3)peaks
+
+function reinit_globals()
+  
+end

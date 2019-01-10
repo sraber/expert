@@ -10,7 +10,8 @@ end
 
 g_debugprinting=true
 
-require 'TestData\\ACCW1'
+require 'TestData\\SHIPS-pumpscott'
+--require 'TestData\\ACCW1'
 --require 'TestData\\data'
 --require 'TestData\\composite'
 
@@ -24,8 +25,8 @@ require 'TestData\\ACCW1'
 
 initialize_data()
 
-require "adhock"
-findLF()
+--require "adhock"
+--findLF()
 
 g_faults_out, g_fr_passed, g_fr_failed = infer( do_fault_analysis )
 
