@@ -1,4 +1,4 @@
--- normalize.lua    Rev 10     12/7/18
+-- normalize.lua    Rev 13     1/10/18
 
 -- returns true if an AC motor in in the train
 function fixed_speed()
@@ -596,51 +596,55 @@ local function update_dataset_speeds(sr1xs)
     for ei,e in ipairs(machine.elements) do -- build a table of dataset indexs associated to the range
       if e.data~=nil and e.data.spec~=nil and e.data.spec.cpl~=nil and e.data.spec.cpl.normal~=nil  then
         for ax,inf in pairs (e.data.spec.cpl.normal) do
-          local i=ax..ei
-          local dataranges={}
-          dataranges[i]={}
-          for _,ds in ipairs(e.data.spec.normal[ax]) do
-            local drng={}
-            if dataranges[i][tostring(machine.datasets[ds].fmax)]~=nil then
-              drng=dataranges[i][tostring(machine.datasets[ds].fmax)]
+          if string.len(ax)==1 then
+            local i=ax..ei
+            local dataranges={}
+            dataranges[i]={}
+
+            for _,ds in ipairs(e.data.spec.normal[ax]) do
+              local drng={}
+              if dataranges[i][tostring(machine.datasets[ds].fmax)]~=nil then
+                drng=dataranges[i][tostring(machine.datasets[ds].fmax)]
+              end
+              table.insert(drng,ds)
+              dataranges[i][tostring(machine.datasets[ds].fmax)]=drng
             end
-            table.insert(drng,ds)
-            dataranges[i][tostring(machine.datasets[ds].fmax)]=drng
-          end
-          local miaspeed
-          for i,mia in pairs(dataranges) do
-            local ax=string.sub(i,1,1)
-            local mi=tonumber(string.sub(i,2))
-            miaspeed=0
-            local dss={}
-            for fm,dss in pairs(mia) do
-              fm=tonumber(fm)
-              for _,ds in ipairs(dss) do
-                updated=false
-                for _,sr1x in ipairs(sr1xs) do 
-                  if sr1x.mi==mi and sr1x.axis==ax then
-                    if sr1x.info[1]~=nil then
-                      for _,inf in ipairs (sr1x.info) do
-                        if inf.sfreq~=nil then
-                          if inf.sfreq>0 then
-                            miaspeed=inf.sfreq 
+
+            local miaspeed
+            for i,mia in pairs(dataranges) do
+              local ax=string.sub(i,1,1)
+              local mi=tonumber(string.sub(i,2))
+              miaspeed=0
+              local dss={}
+              for fm,dss in pairs(mia) do
+                fm=tonumber(fm)
+                for _,ds in ipairs(dss) do
+                  updated=false
+                  for _,sr1x in ipairs(sr1xs) do 
+                    if sr1x.mi==mi and sr1x.axis==ax then
+                      if sr1x.info[1]~=nil then
+                        for _,inf in ipairs (sr1x.info) do
+                          if inf.sfreq~=nil then
+                            if inf.sfreq>0 then
+                              miaspeed=inf.sfreq 
+                            end
+                          end
+                          if inf.dsi==ds and miaspeed>0 then
+
+                            debugprint('>Pickup: '..sr1x.mi..' Axis: '..sr1x.axis..' dsi: '..ds..' Fmax: '..round(fm)..' speed set to: '..round(miaspeed,3)..' hz '..round(miaspeed*60/sr1x.shaftspeed,2))
+                            machine.datasets[ds].speed=miaspeed
+                            --add_1x_place_holders_to_ds_peaks (ds,i) 
+                            updated=true
                           end
                         end
-                        if inf.dsi==ds and miaspeed>0 then
-
-                          debugprint('>Pickup: '..sr1x.mi..' Axis: '..sr1x.axis..' dsi: '..ds..' Fmax: '..round(fm)..' speed set to: '..round(miaspeed,3)..' hz '..round(miaspeed*60/sr1x.shaftspeed,2))
-                          machine.datasets[ds].speed=miaspeed
-                          --add_1x_place_holders_to_ds_peaks (ds,i) 
-                          updated=true
-                        end
                       end
-                    end
-                    --end
-                    if not (updated) and miaspeed>0 then
-                      debugprint('Pickup: '..sr1x.mi..' Axis: '..sr1x.axis..' dsi: '..ds..' Fmax: '..round(fm)..' speed set to: '..round(miaspeed,3)..' hz '..round(miaspeed*60/sr1x.shaftspeed,2))
-                      machine.datasets[ds].speed=miaspeed
-                      --add_1x_place_holders_to_ds_peaks (ds,i) 
-                      updated=true
+                      --end
+                      if not (updated) and miaspeed>0 then
+                        debugprint('Pickup: '..sr1x.mi..' Axis: '..sr1x.axis..' dsi: '..ds..' Fmax: '..round(fm)..' speed set to: '..round(miaspeed,3)..' hz '..round(miaspeed*60/sr1x.shaftspeed,2))
+                        machine.datasets[ds].speed=miaspeed
+                        --add_1x_place_holders_to_ds_peaks (ds,i) 
+                        updated=true
+                      end
                     end
                   end
                 end
@@ -703,12 +707,14 @@ end
 function normalize2( ss_data_groups )
   local updated=false
   -- g_peak_list=reduced_peak_list()  -- Build a minimized peak list DAY
-  local sr1xs=pattern_normalize()--z_analyze_PL_harmonics_for_1x()
+  local sr1xs=pattern_normalize()
   updated,_=update_dataset_speeds(sr1xs)--z_update_dataset_speeds(sr1xs,orders)  --  analysis peaklist harmonics for 1x, return false if current dataset speeds are within vspeed DAY
-
-  assert(updated,"Data Normalization Failed") -- returns an error normalizezation fails DY
+  if not(updated) then
+    sr1xs=pattern_normalize(nil,nil,true)
+    updated,_=update_dataset_speeds(sr1xs)
+  end
+  assert(updated,"Data Normalization Failed") -- returns an error normalization fails DY
   flag_normalized_peaks_in_cpl(sr1xs)
-  --if not updated then normalize1( ss_data_groups ) end
   return sr1xs
 end
 
@@ -734,25 +740,48 @@ local function fixed_speed()
   return fixedspeed
 end
 
+-- binary search for keys (sord or sfreq) in peaks of peaklist returns an index delta percent below target
+local function find_nearest_peak_in_cpl(pl,target,delta,start,speedratio,key)
+  start=start or 1
+  key=key or 'sord'
+  speedratio=speedratio or 1
+  local low,hi,mid=start,#pl,0
+  while low<=hi do
+    mid=math.floor((low+hi)/2)
+    local value=pl[mid][key]
+    if key=='sord' then value=value/speedratio end
+    if value<=target*(1-delta) then
+      low=mid+1
+    else
+      hi=mid-1
+    end
+  end
+  low=low-1
+  if low==0 then low=1 end
+  return low
+end
 
-function pattern_normalize(range)
-  local percent_pattern_match=30
+
+function pattern_normalize(range,percent_pattern_match,use2xlf)
+  percent_pattern_match=percent_pattern_match or 30
+  use2xlf=use2xlf or false
   local peak_quality=machine.scale  -- defines minimum mpct for use calculating speed (fans have short peaks and need smaller mpct)
   if peak_quality~=0 then 
     peak_quality=10^(peak_quality/20)
   else
     peak_quality=10^(10/20)
   end
-
+  peak_quality=1
   local sss = machine.supershafts
   local speeds = compute_super_shaft_speeds(sss, machine.ispeed, 1.0 )
+
   local fff = MakeForcingOrdersForSuperShafts(sss, true )
   local ff={}      
   for i,sp in ipairs(fff) do
     for _,en in ipairs(sp) do
-      -- if en.tag ~= '1X' then
-      table.insert(ff,{speed=speeds[i],order=en.order,tag=en.tag})
-      --end
+      if speeds[i] ~= nil then
+        table.insert(ff,{speed=speeds[i],order=en.order,tag=en.tag})
+      end
     end
   end
   if #ff==0 then
@@ -760,15 +789,30 @@ function pattern_normalize(range)
       table.insert(ff,{speed=sp,order=1,tag='1X'})
     end
   end
+  -- remove duplicate speeds
+  if #speeds>1 then
+    local spds={}
+    for _,sp in ipairs(speeds) do
+      spds[sp]=true
+    end
+    speeds={}
+    for sp,_ in pairs(spds) do
+      table.insert(speeds,sp)
+    end  
+  end
+  table.sort(speeds,function (a,b) return a<b end)
   --
   -- determine if the train is fixed speed (i.e ac motor drive) or variable speed (i.e. turbine drives)
   --
   local fixedspeed=fixed_speed()
   local close=.002
+  local speedissync=is_a_multiple(machine.speed,machine.linef,close) 
   local searchrange= range or machine.vspeed/100*2
+  local normalize={range=range,pattern_match=percent_pattern_match,use_2xLF=use2xlf}
   if not(fixedspeed) then  -- if the train is not fixed speed then open up the search range
-    close=.005
+    close=.002
     searchrange=2*searchrange
+    use2xlf=true
   end
   local freq1x=0
   local sr1xs={}
@@ -780,190 +824,220 @@ function pattern_normalize(range)
   local mi,axis
   for ei,e in ipairs(machine.elements) do
     mi=ei
-    if e.data~=nil and e.data.spec~=nil and e.data.spec.cpl~=nil and e.data.spec.cpl.normal~=nil  then
+    if e~=nil and e.data~=nil and e.data.spec~=nil and e.data.spec.cpl~=nil and e.data.spec.cpl.normal~=nil  then 
+      local mspeed=machine.speed*e.speedratio
       for ax,inf in pairs (e.data.spec.cpl.normal) do
-        axis=ax
-        debugprint('Normalizing to machine speed '..round(machine.speed*60,1)..' +/-'..round(machine.speed*60*machine.vspeed/100,2) .. ' rpm     shaft speed: '..round(machine.speed*e.speedratio*60,1))
-        sr1x={}  
-        freq1x=0
-        local index
-        local speedfound=false
-        -- Deterimine if there are enough forcing orders to pattern match by building a table of orders to match
-        local pattern={}
-        local ptrn={}
-        if #ff>=1 then 
+        if string.len(ax)>1 then
+          axis=string.sub(ax,1,1)
+          debugprint('Normalizing to machine speed '..round((machine.speed*(1-machine.vspeed/100))*60,1)..' - '..round((machine.speed*(1+machine.vspeed/100))*60,1) .. ' rpm     shaft speed: '..round(machine.speed*e.speedratio*60,1))
+          sr1x={}  
+          freq1x=0
+          local index
+          local speedfound=false
+          -- Deterimine if there are enough forcing orders to pattern match by building a table of orders to match
+          local pattern={}
+          local ptrn={}
+          if #ff>=1 then 
 
-          -- build pattern table
-          for _,f in ipairs(ff) do
-            local ord=f.speed/e.speedratio*f.order 
-            ptrn[tostring(ord)]=true
-          end
-          for ord,_ in pairs(ptrn) do
-            table.insert(pattern,tonumber(ord))
-          end
-          table.sort(pattern,function (a,b) return a<b end)
+            -- build pattern table
+            for _,f in ipairs(ff) do
+              local ord=f.speed/e.speedratio*f.order 
+              ptrn[tostring(ord)]=true
+            end
+            for ord,_ in pairs(ptrn) do
+              table.insert(pattern,tonumber(ord))
+            end
+            table.sort(pattern,function (a,b) return a<b end)
 
-          -- get the data ranges
-          local dataranges={}
-          for _,ds in ipairs(e.data.spec.normal[ax]) do
-            table.insert(dataranges,{dsi=ds,orders=machine.datasets[ds].fmax/(machine.speed*e.speedratio)})  -- set the dataset max orders based on  machineclass nominal speed
-          end
+            -- get the data ranges
+            local dataranges={}
+            for _,ds in ipairs(e.data.spec.normal[string.sub( ax,1,1)]) do
+              table.insert(dataranges,{dsi=ds,orders=machine.datasets[ds].fmax/(machine.speed*e.speedratio)})  -- set the dataset max orders based on  machineclass nominal speed
+            end
 
-          -- sort the data ranges
-          local moved=true
-          local temp={}
-          while moved do
-            moved=false
-            for i,j in ipairs(dataranges) do
-              if dataranges[i+1]~=nil then
-                if j.orders>dataranges[i+1].orders then
-                  temp=dataranges[i]
-                  dataranges[i]=dataranges[i+1]
-                  dataranges[i+1]=temp
-                  moved=true
+            -- sort the data ranges
+            local moved=true
+            local temp={}
+            while moved do
+              moved=false
+              for i,j in ipairs(dataranges) do
+                if i~=nil and dataranges[i+1]~=nil then
+                  if j.orders>dataranges[i+1].orders then
+                    temp=dataranges[i]
+                    dataranges[i]=dataranges[i+1]
+                    dataranges[i+1]=temp
+                    moved=true
+                  end
                 end
               end
             end
-          end
-          local maxte=0
-          local maxct=0
-          local sord,mt,spd=0,0,0
-          local minamp,maxamp=0,0
-          for j,pk in ipairs(inf.peaks) do
-            if j>1 then
-              if minamp>=pk.sval then
+            local maxte=0
+            local maxct=0
+            local sord,mt,spd=0,0,0
+            local minamp,maxamp=0,0
+            for j,pk in ipairs(inf.peaks) do
+              if j>1 then
+                if minamp>=pk.sval then
+                  minamp=pk.sval
+                end
+                if maxamp<=pk.sval then
+                  maxamp=pk.sval
+                end
+              else
                 minamp=pk.sval
               end
-              if maxamp<=pk.sval then
-                maxamp=pk.sval
-              end
-            else
-              minamp=pk.sval
             end
-          end
-          local dynamicrange=maxamp-minamp
-          local pat={}
-          --
-          -- This section of code examines each peak in the peak list to determine if it is a harmonic of any shaft in the train that has the best pattern match
-          --
-          local lastorders=0
-          local lastspeed=0
-          local sbin=0
+            local dynamicrange=maxamp-minamp
+            local pat={}
+            --
+            -- This section of code examines each peak in the peak list to determine if it is a harmonic of any shaft in the train that has the best pattern match
+            --
+            local lastorders=0
+            local lastspeed=0
+            local sbin=0
 
-          for d,dr in ipairs(dataranges) do
-            maxte=0
-            maxct=0
-            --  determine the part of the pattern that can be used for each dataset
-            pat={}
-            for _,p in ipairs(pattern) do
-              local lowlimit=.05 
-              if #pattern==1 and d==1 then lowlimit=0 end
-              if d>1 then lowlimit=dataranges[d-1].orders*1.02/dr.orders end
-              if p>lowlimit*dr.orders and p<dr.orders*.98 then
-                table.insert(pat,p)
-              end
-            end
-            if #pat==0 then
-              debugprint ("No pattern to match for "..round(dr.orders)..'x range.')
-              table.insert (sr1x,{sfreq=-1,dsi=dr.dsi})
-            else
-              for _,p in ipairs(pat) do
-                debugprint(p)
-              end
-              spd=0
+            for d,dr in ipairs(dataranges) do
               maxte=0
               maxct=0
-              freq1x=0
-              for p,pk1 in ipairs (inf.peaks) do                    -- subject peaks
-                if pk1.sord>dr.orders then break end 
-                if pk1.sord>=lastorders and pk1.sord<=dr.orders then
-                  for s,sp in ipairs (speeds) do                    -- speeds of each shaft
-                    if (dr.orders/(sp/e.speedratio) < 300 and sp~=1) or sp==1 then
-                      local harms=dr.orders/sp*.98
-                      --if sp/e.speedratio<.25 then harms=15 end
-                      for  i=1,harms,1 do -- harmonic of interest
-                        --
-                        -- is subject peak 1x (peak freq/shaft speed/harmonic) in the search range of machine 1x and the same dataset
-                        --
-                        if (pk1.sfreq/(sp/e.speedratio))/i>machine.speed*e.speedratio*(1-searchrange) and (pk1.sfreq/(sp/e.speedratio))/i<machine.speed*e.speedratio*(1+searchrange) and pk1.sdsi==dr.dsi  then 
-                          local te=0
-                          local ct=0
-                          for _,pt in ipairs (pat) do -- orders to normalize on
-                            for j,pk2 in ipairs (inf.peaks) do 
-                              if pk2.sdsi==dr.dsi then
-                                if pk2.sord>=lastorders and pk2.sord<=dr.orders then
-                                  if pk2.sord*.99>(pk1.sord/(sp/e.speedratio))/i*pt then break end
+              --  determine the part of the pattern that can be used for each dataset
+              pat={}
+              local lowlimit=.05 
+              for _,p in ipairs(pattern) do
+                lowlimit=.05 
+                if #pattern==1 and d==1 then lowlimit=0 end
+                if d>1 then lowlimit=dataranges[d-1].orders*1.02/dr.orders end
+                if p>lowlimit*dr.orders and p<dr.orders*.98 then
+                  table.insert(pat,p)
+                end
+              end
+              if d>1 and #pat~=0 then
+                pat={}
+                for _,p in ipairs(pattern) do
+                  if dr.orders/dataranges[d-1].orders <= 15 then
+                    lowlimit=dataranges[d-1].orders*1.02//3
+                  else 
+                    lowlimit=dr.orders/20
+                  end
+                  if p>lowlimit and p<dr.orders*.98 then
+                    table.insert(pat,p)
+                  end
+                end
+              end
+              if #pat==0 then
+                debugprint ("No pattern to match for "..round(dr.orders)..'x range.')
+                table.insert (sr1x,{sfreq=-1,dsi=dr.dsi})
+              else
+                for _,p in ipairs(pat) do
+                  debugprint(p)
+                end
+                spd=0
+                maxte=0
+                maxct=0
+                freq1x=0
+                local peaks={}
+                for p,pk in ipairs (inf.peaks) do
+                  if pk.sdsi==dr.dsi then table.insert (peaks,pk) end
+                end
+                for p,pk1 in ipairs (peaks) do                    -- subject peaks
+                  if pk1.sord/e.speedratio>dr.orders then break end  -- peak beyond data range
+                  if pk1.sord>=lastorders and pk1.sord/e.speedratio<=dr.orders then -- peak in data range
+                    for s,sp in ipairs (speeds) do                    -- speeds of each shaft
+                      if (dr.orders/(sp/e.speedratio) < 600 and sp~=1) or sp==1 then
+                        local harms=dr.orders/(sp/e.speedratio)*.98
+                        for  i=1,harms,1 do -- harmonic of interest
+                          -- is subject peak 1x (peak freq/shaft speed/harmonic) in the search range of machine 1x and the same dataset
+                          if (pk1.sfreq/(sp/e.speedratio))/i>mspeed*(1-searchrange) and (pk1.sfreq/(sp/e.speedratio))/i<mspeed*(1+searchrange)  then 
+                            local te=0
+                            local ct=0
+                            local lastindx=1
+                            for _,pt in ipairs (pat) do -- pt is the orders to normalize on
+                              local strtindx=find_nearest_peak_in_cpl(peaks,(pk1.sord/(sp/e.speedratio))/i*pt,0,lastindx)
+                              for indx=strtindx,#peaks,1 do 
+                                local pk2=peaks[indx]
+                                if pk2.sord>=lastorders and pk2.sord/e.speedratio<=dr.orders  then
+                                  if pk2.sord*.98>(pk1.sord/(sp/e.speedratio))/i*pt then goto nextptrn end
+                                  lastindx=ind
                                   --
                                   -- is this peak a multiple of the subject peak 1x * pattern order
                                   --
                                   local itismult,mult,rmdr=z_is_a_multiple((pk1.sord/(sp/e.speedratio))/i*pt,pk2.sord,close) 
+                                  local pk2is2xlfmult=is_a_multiple(2*machine.linef,pk2.sfreq,.005)
                                   --
                                   -- is subject peak prominant and is this peak slighty significant and not the noise floor
                                   --
-                                  if itismult and mult==1 and pk1.mpct>peak_quality and (pk2.mpct>.2 and pk2.sval>minamp+(.05*dynamicrange)) then
-                                    --
-                                    -- add a slight weighting to 1x in pattern for cases were the higher orders have tight side bands 
-                                    --
-                                    if pt==1 and #pat<=3 then -- added 'and #pat<3' to remove weighting on complex drivetrains 
-                                      te=te+ pk2.sval*3.5
-                                    else
-                                      te=te+ pk2.sval*2
-                                    end
+                                  if itismult and mult==1 and pk1.mpct>peak_quality and (pk2.mpct>.2 and pk2.sval>minamp+6) and (speedissync or (not(speedissync) and (not(pk2is2xlfmult) or use2xlf ))) then
                                     ct=ct+1
-                                  end
-                                end
-                              end
-                            end  
-                          end
-                          if te*ct>=maxte and ct>=maxct and ct~=0  and sp/e.speedratio>=spd then
-                            mt=i
-                            spd=(sp/e.speedratio)
-                            index=p
-                            sord=(pk1.sord/(sp/e.speedratio))/i
-                            freq1x=(pk1.sfreq/(sp/e.speedratio))/i
-                            sbin=pk1.sbin
-                            maxte=te*ct
-                            maxct=ct
-                            debugprint(">>>",p,i,round((sp/e.speedratio)*e.speedratio,3),round(pk1.sfreq,1),round ((pk1.sfreq/(sp/e.speedratio))/i,1),round ((pk1.sfreq/(sp/e.speedratio))/i*60,1),round(te),ct,'mpct:'..round(pk1.mpct),round ((pk1.sfreq/(sp/e.speedratio))/i*60/e.speedratio,1), maxct)
-                          end  -- how many matches
-                        end  -- is calculated 1x in searchranges
-                      end -- harmonic of interest
-                    end -- speed is big enough percentage of the range
-                  end-- speeds of each shaft
-                end -- is pk1 in dataset range
-              end-- subject peaks
-              --
-              --  is there a pattern match
-              --
-              if freq1x>0 and maxct>0 and (#pat<=3 or (#pat>3 and maxct>=math.ceil (#pat*(percent_pattern_match/100)))) then
-                table.insert (sr1x,{sfreq=freq1x,pk_index=index,sord=sord,speed=e.speedratio,dsi=dr.dsi,sbin=sbin})
-                debugprint('mi: '..ei..' axis: '..axis..' order: '..round(sord,2)..'x at '..round(freq1x,1)..'hz from '..round(freq1x*mt*spd,2)..'/('..mt..'*'..round(spd*e.speedratio,3)..')  '..maxct..'/'..#pat.." FO pattern "..' RPM '..round(freq1x*60,1),round(dr.orders)..'x range',round(freq1x*60/e.speedratio,1), mt)
-                lastspeed=freq1x
-                speedfound=true
-              else
-                table.insert (sr1x,{sfreq=-1,dsi=dr.dsi})
-                debugprint ("No pattern match for "..round(dr.orders)..'x range.')
-              end  -- is the pattern 
-            end  -- #pat>0
-            lastorders=dr.orders
-          end-- data ranges
-          goto nxtinf
-          if speedfound then goto nxtinf end
-        else
-          speedfound=false
-        end
-        if mi==nil or axis==nil then
-          debugprint('No speed match found')
-        else
-          debugprint('No speed match found for '..mi..' - '..axis)
-        end
-        table.insert (sr1x,{speed=e.speedratio})
+                                    local pe=(pk2.sval+pk2.mdif)*pk1.mpct -- peak quality weighted energy
+                                    if pt==1 and #pat<=3 then -- added 'and #pat<3' to remove weighting on complex drivetrains 
+                                      te=te+ pe*2-- add a slight weighting to 1x in pattern for cases were the higher orders have tight side bands 
+                                    else
+                                      te=te+ pe
+                                    end
+                                    goto nextptrn
+                                  end  -- is peak an acceptable match
+                                end -- is peak in range
+                              end -- peak index
+                              :: nextptrn ::
+                            end  -- pattern
+                            if te*ct>=maxte and ct>=maxct and ct~=0 --[[ and sp/e.speedratio>=spd ]] then 
+                              local ffwgt=1
+                              local tagmatch=''
+                              for _,f in ipairs (ff) do
+                                if i==f.order and sp==f.speed then ffwgt=3;tagmatch=f.tag..' - '..round(i,3)..'x'..round(sp,3)..'X';break end
+                              end 
+                              mt=i
+                              spd=(sp/e.speedratio)
+                              index=p
+                              sord=(pk1.sord/(sp/e.speedratio))/i
+                              freq1x=(pk1.sfreq/(sp/e.speedratio))/i
+                              sbin=pk1.sbin
+                              maxte=te*ct*ffwgt
+                              maxct=ct
+                              debugprint(">>> pk: "..p..'  '..i..' x '..round((spd),3)..' tone freq: '..round(pk1.sfreq,1)..' ord: '.. round ((pk1.sfreq/(sp/e.speedratio))/i,3)..' rpm: '..round (freq1x*60,1)..' mxte: '..round(maxte,4)..' ct: '..ct..' '..maxct..' mpct:'..round(pk1.mpct,3)..' spd sft rpm: '..round ((pk1.sfreq/(sp/e.speedratio))/i*60/e.speedratio,1),tagmatch )
+                            end  -- how many matches
+                          end  -- is calculated 1x in searchranges
+                        end -- harmonic of interest
+                      end -- speed is big enough percentage of the range
+                    end-- speeds of each shaft
+                  end -- is pk1 in dataset range
+                end-- subject peaks
+                --
+                --  is there a pattern match
+                --
+                if freq1x>0 and maxct>0 and (#pat<=3 or (#pat>3 and maxct>=math.ceil (#pat*(percent_pattern_match/100)))) then
+                  table.insert (sr1x,{sfreq=freq1x,pk_index=index,sord=sord,speed=e.speedratio,dsi=dr.dsi,sbin=sbin})
+                  debugprint('mi: '..ei..' axis: '..axis..' order: '..round(sord,2)..'x at '..round(freq1x,1)..'hz from '..round(freq1x*mt*spd,2)..'/('..mt..'*'..round(spd*e.speedratio,3)..')  '..maxct..'/'..#pat.." FO pattern "..' RPM '..round(freq1x*60,1),round(dr.orders)..'x range',round(freq1x*60/e.speedratio,1), mt)
+                  lastspeed=freq1x
+                  speedfound=true
+                else
+                  table.insert (sr1x,{sfreq=-1,dsi=dr.dsi})
+                  debugprint ("No pattern match for "..round(dr.orders)..'x range, mi: '..ei..' axis: '..axis)
+                end  -- is the pattern 
+              end  -- #pat>0
+              lastorders=dr.orders/3
+            end-- data ranges
+            goto nxtinf
+            if speedfound then goto nxtinf end
+          else
+            speedfound=false
+          end
+          if mi==nil or axis==nil then
+            debugprint('No speed match found')
+          else
+            debugprint('No speed match found for '..mi..' - '..axis)
+          end
+          table.insert (sr1x,{speed=e.speedratio})
 --
-        ::nxtinf::
---
-        table.insert(sr1xs,{found=speedfound,mi=mi,axis=axis,info=sr1x,shaftspeed=e.speedratio})
-        local stop
-      end --for m,inf
+          ::nxtinf::
+          --
+          if ei==1 then
+            table.insert(sr1xs,{found=speedfound,mi=mi,axis=axis,info=sr1x,shaftspeed=e.speedratio,normalize=normalize})
+          else
+            table.insert(sr1xs,{found=speedfound,mi=mi,axis=axis,info=sr1x,shaftspeed=e.speedratio})
+          end
+          local stop
+        end --for m,inf
+      end
     end
   end  
   return sr1xs

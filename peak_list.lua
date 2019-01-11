@@ -1,4 +1,4 @@
--- peak_list.lua   rev 11  12/6/2018
+-- peak_list.lua   rev 12  12/17/2018
 --
 
 function reduced_peak_list()
@@ -839,7 +839,8 @@ end
 --
 function find_peak_in_peaklist(element,brg,straxis,bin)
   local m,p
-  local aliasmi = get_element_alias(brg)
+  local mi = safe_value_1( machine.components[g_shaft_number].map[brg], M_SHAFT_DATA_INDEX, brg )
+  local aliasmi = get_machine_element_alias(mi)
   --old peak list
   for i,mia in ipairs(g_peak_list) do
     if mia.mi==aliasmi and mia.axis==straxis then

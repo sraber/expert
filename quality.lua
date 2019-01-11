@@ -1,4 +1,4 @@
--- quality.lua    Rev 3 12/6/18
+-- quality.lua    Rev 5 1/9/19
 
 local data_quality_fault_guids={
   ['data ranges']='b064a670-ef2e-4226-93fb-6d2dee66c570',
@@ -11,7 +11,8 @@ local data_quality_fault_guids={
   ['speed change between pickups']='9fdf1b1a-dbaf-4078-9b5f-e1220ce1559a',
   ['speed change on pickup']='5ba9638c-72f2-4c20-ada0-299eeee6faa5',
   ['missing waveforms']='7a6e5c29-d253-4961-bf50-7040e30c0b0f',
-  ['higher range norm']='f067f248-ecb4-4b60-ae93-bb0a0917bb5e'}
+  ['higher range norm']='f067f248-ecb4-4b60-ae93-bb0a0917bb5e',
+  ['2xFL normalize']='8b4fe728-ae8f-4a7d-95cf-97eef2224650'}
 
 local function data_quality_assert2(fault, severity, confidence)
   local f = assert( machine.quality_faults )
@@ -186,13 +187,13 @@ local function data_check_axis( data, ax, ei )
             end
           end
           avedif=avedif/n
-          if avedif > 20 then
-            local sev=10^(avedif/20)*10
-            table.insert(errors,'Significantly higher than expected signal level on axis: '..ax..' ds: '..normal..' dif: '..round(avedif,1))
+          if avedif > 13 then
+            local sev=avedif*2 --10^(avedif/20)
+            table.insert(errors,'Significantly higher than expected signal level on axis: '..ax..' ds: '..normal..' dif: '..round(avedif)..' sev: '..round(sev,1))
             faults[data_quality_fault_guids['high noise floor']]=sev
-          elseif avedif < -20 then
-            local sev=10^(-avedif/20)*10
-            table.insert(errors,'Significantly lower than expected signal level on axis: '..ax..' ds: '..normal..' dif: '..round(avedif,1))
+          elseif avedif < -26 then
+            local sev=-avedif --10^(-avedif/20)
+            table.insert(errors,'Significantly lower than expected signal level on axis: '..ax..' ds: '..normal..' dif: '..round(avedif)..' sev: '..round(sev,1))
             faults[data_quality_fault_guids['low noise floor']]=sev
           end
         end
@@ -269,6 +270,10 @@ function normalization_quality(errors,sr1xs)
   debugprint ("<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< Normalization Quality Check Started >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
   if sr1xs~=nil then
   for _,mia in ipairs(sr1xs) do
+      if mia.normalize~=nil and mia.normalize.use_2xLF~=nil and mia.normalize.use_2xLF then
+        data_quality_assert2(data_quality_fault_guids['2xFL normalize'],26,1)
+        table.insert(errors,'Warning - Data normalized without 2xLF suppression')
+      end
     for _,inf in ipairs(mia.info) do
       if inf.speedsource=='higher range' then
         data_quality_assert2(data_quality_fault_guids['higher range norm'],26,1)
@@ -307,20 +312,20 @@ function normalization_quality(errors,sr1xs)
   end
   local ma=mt/mn
   if (mmax-mmin)/ma>.02 then 
-    local sev=((mmax-mmin)/ma-.02)/.02*100
+    local sev=((mmax-mmin)/ma-.02)/.02*50
     table.insert(errors,'Warning - Speed change between pickups > 2% during testing.  Average speed - '..round(ma*60,1)..' RPM, Speed change - '..round((mmax-mmin)*60,2)..' RPM')
     data_quality_assert2(data_quality_fault_guids['speed change between pickups'],sev,1)
   end
   local mpd=math.abs(targetspeed-ma)/targetspeed
   if mpd>vspeed/100 then 
-    local sev=(mpd*100-vspeed)/vspeed*100 
+    local sev=(mpd*100-vspeed)/vspeed*50 
     table.insert(errors,'Warning - Speed out of range. Average machine of '..round(ma*60,1)..' RPM is greater than '..(vspeed)..'% from the VTAG speed of '..round(targetspeed*60,1)..' RPM.' )
     data_quality_assert2(data_quality_fault_guids['speed out of range'],sev,1)
   end
   for ei,p in pairs(pu) do
     local a=p.t/p.n
     if (p.max-p.min)/a>.01 then 
-      local sev=((p.max-p.min)/a-.01)/.01*100
+      local sev=((p.max-p.min)/a-.01)/.01*50
       table.insert(errors,'Warning - Speed change > 1% during aquisition on pickup '..ei..'.  Pickup average speed - '..round(a*60,1)..' RPM, Speed change - '..round((p.max-p.min)*60,2)..' RPM.')
       data_quality_assert2(data_quality_fault_guids['speed change on pickup'],sev,1)
     end

@@ -1,4 +1,4 @@
--- infer.lua    Rev 9     11/28/18
+-- infer.lua    Rev 10     1/11/19
 
 -- This provides a default engineering unit for a rule.  This is
 -- not the desired way to define the rule unit.  It should be defined 
@@ -156,7 +156,11 @@ function infer( do_analysis )
   g_infer_rules_passed = shaft_rules_passed
   g_infer_rules_failed = shaft_rules_failed
   g_infer_rules_warn = shaft_rules_warn
-  g_rule_map = {}
+  if g_warning_level > 1 then
+    g_rule_map = {}
+  else
+    g_rule_map = nil
+  end
   g_rule_map_order = 1
   
   ---------------------------------------------------------
@@ -177,6 +181,14 @@ function infer( do_analysis )
   -------------------------------------------------------
   
   local rules = do_analysis( shaft_faults, infer_solution )
+    
+  --*******************************************************
+  -- This call forces a full garbage collection cycle.  
+  -- Lua does stepped garbage collection if left to its own devices.
+  -- This place in the code seems like a logical place to tell Lua,
+  -- "we're starting over, clean things up".
+  collectgarbage()
+  --*******************************************************
     
   for _,comp in pairs(machine.components) do
     -- Scan for maximum priority rule

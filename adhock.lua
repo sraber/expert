@@ -12,3 +12,11 @@ function findLF()
       end
    end
 end
+
+function print_globals()
+  for k,v in pairs(_G) do
+    if type(v)=='table' then
+      print("Global key", k )
+    end
+  end
+end

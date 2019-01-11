@@ -1,4 +1,4 @@
-﻿-- functions.lua    Rev 67 1/9/19
+﻿-- functions.lua    Rev 69 1/11/19
 
 -- This is set in the do_xxx_analysis functions and used by get_infer_solution.
 local l_fault_analysis
@@ -47,7 +47,7 @@ end
 --******************* End Rule Management *************************
 --------------------------------------------------------------------------
 function do_fault_analysis( fault_table, fault_ex_table )
-    l_fault_analysis = 1
+    l_fault_analysis = true
   -- g_faults_or_recs is used by a number of functions below.  These are functions
   -- that we want to act on either the fault table or the recommendation table
   -- in the same way.  So we coded them to act on the global variable g_fautls_or_recs
@@ -78,7 +78,7 @@ function do_fault_analysis( fault_table, fault_ex_table )
 end
 
 function do_rec_analysis( rec_table, rec_ex_table )
-    l_fault_analysis = 0
+    l_fault_analysis = false
   -- g_faults_or_recs is used by a number of functions below.  These are functions
   -- that we want to act on either the fault table or the recommendation table
   -- in the same way.  So we coded them to act on the global variable g_fautls_or_recs
@@ -448,7 +448,8 @@ end
 -- Input:
 --    tdsi - An array of data set index.  
 --
-local function make_composite_peak_table( tdsi,aves )
+local function make_composite_peak_table( tdsi,aves,noduplicates )
+  if noduplicates==nil then noduplicates = true end
 -- band width sort
   local function bw_sort( idx1, idx2 )
     return machine.datasets[idx1].bw < machine.datasets[idx2].bw
@@ -476,7 +477,10 @@ local function make_composite_peak_table( tdsi,aves )
       if ds.fmax > cfmax then
         -- Find the smallest index in the current data that is higher than the FMax
         -- in the previous data.
-        local min_bin = 1.0 + (cfmax / ds.bw)
+        local min_bin = 1.0
+        if noduplicates then
+          min_bin = 1.0 + (cfmax / ds.bw)
+        end
         cfmax = ds.fmax
         -- ds.peaks is sorted low to high so we could find the first index past min_bin
         -- and start from there, but not sure it's worth the additional effort.
@@ -494,7 +498,7 @@ local function make_composite_peak_table( tdsi,aves )
             freq=ds.bw*(bin-1)
             ord=freq/ds.speed
           end
-          if d==1 or (d>1 and freq>lastmax) then
+          if d==1 or ((d>1 and freq>lastmax and noduplicates) or (d>1 and not(noduplicates)))  then
             lastmax=freq
             if bin >= min_bin then
               idx=idx+1
@@ -502,6 +506,7 @@ local function make_composite_peak_table( tdsi,aves )
               --s=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , s )
               m=ds_spline_avg( ds, bin )
               --m=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , m )
+              if noduplicates then
                   table.insert( comp_peaks, {
                       sbin=bin,
                       sdsi=dsi,
@@ -525,7 +530,22 @@ local function make_composite_peak_table( tdsi,aves )
                       fmax=ds.fmax ,
                       order=round(ord,2)
                       })
+              else
+                table.insert( comp_peaks, {
+                    sbin=bin,
+                    sdsi=dsi,
+                    sfreq=freq,
+                    sord=ord,
+                    pk_index=idx,
+                    sval=20*math.log(s/1e-6,10),
+                    mval=20*math.log(m/1e-6,10),
+                    mdif=20*math.log((s/m),10),
+                    mpct=((s-m)/m), 
+                    fmax=ds.fmax ,
+                    order=round(ord,2)
+                  })
                 end
+            end
               end
             end
           end
@@ -786,7 +806,8 @@ function initialize_data( norm )
           for ax, tdsi in pairs(axes) do
             if typ=="normal" then
               local aves=e.data.spec['average'][ax]
-              typ_table[ax] ={peaks= make_composite_peak_table(tdsi, aves )}
+              typ_table[ax..'norm'] ={peaks= make_composite_peak_table(tdsi, aves,false )} -- build non composite (complete) peaklist for normalizing 
+              typ_table[ax] ={peaks= make_composite_peak_table(tdsi, aves,true)}
             else
               typ_table[ax] ={peaks= make_composite_peak_table(tdsi, {} )}
             end
@@ -892,6 +913,9 @@ function initialize_data( norm )
       -- Update sord and order in normal and demod peak lists, and add average info to normal peaks     
       for typ,axes in pairs(e.data.spec.cpl) do
         for ax, pl in pairs(axes) do
+          if string.len(ax)>1 then
+            axes[ax]=nil -- remove normalizing non-composite peaklist
+          else
           pl['shaftspeed']={}
           if #pl.peaks==0 and e.data.spec.normal[ax][1]~=nil then
             pl['shaftspeed']['ave']=machine.datasets[e.data.spec.normal[ax][1]].speed
@@ -971,6 +995,7 @@ function initialize_data( norm )
             end
           end
         end
+      end
       end
 
       -- build a lists of shaft rate harmonic series     
@@ -1168,7 +1193,7 @@ function initialize_data( norm )
                                   local dmamp=ds_spline_value( machine.datasets[dmpk.sdsi], dmpk.sbin )
                                   local dmmamp=ds_spline_avg( machine.datasets[dmpk.sdsi], dmpk.sbin )
                                   local sig=dmamp/dmmamp
-                                  if sig>1 then 
+                                  if sig>2 then 
                                     pk.flags=add_flag(pk.flags,'d')
                                   end  --  if dm pk is significant
                                 end  -- if freqs match
@@ -1470,6 +1495,7 @@ function initialize_data( norm )
       end
     end
   end
+
 
   for _,v in ipairs(rm_rulebase_info) do
     if v.lib.initialize then
