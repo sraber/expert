@@ -1,4 +1,4 @@
--- normalize.lua    Rev 13     1/10/18
+-- normalize.lua    Rev 13     1/23/18
 
 -- returns true if an AC motor in in the train
 function fixed_speed()
@@ -706,18 +706,26 @@ end
 --
 function normalize2( ss_data_groups )
   local updated=false
-  -- g_peak_list=reduced_peak_list()  -- Build a minimized peak list DAY
   local sr1xs=pattern_normalize()
   updated,_=update_dataset_speeds(sr1xs)--z_update_dataset_speeds(sr1xs,orders)  --  analysis peaklist harmonics for 1x, return false if current dataset speeds are within vspeed DAY
   if not(updated) then
     sr1xs=pattern_normalize(nil,nil,true)
     updated,_=update_dataset_speeds(sr1xs)
   end
-  assert(updated,"Data Normalization Failed") -- returns an error normalization fails DY
+  assert(updated,"Data Normalization Failed") -- returns an error normalization when fails DY
   flag_normalized_peaks_in_cpl(sr1xs)
   return sr1xs
 end
+--
+-- Harmonic Energy Normalization,  looks for harmonic series that are target speed or harmonics of target speed
+function normalize3( ss_data_groups )
 
+  local sr1xs=harm_energy_normalize()
+  updated,_=update_dataset_speeds(sr1xs)--z_update_dataset_speeds(sr1xs,orders)  --  analysis peaklist harmonics for 1x, return false if current dataset speeds are within vspeed DAY
+  assert(updated,"Data Normalization Failed") -- returns an error when normalization fails DY
+  flag_normalized_peaks_in_cpl(sr1xs)
+  return sr1xs
+end
 
 local function fixed_speed()
   local fixedspeed=false
@@ -762,9 +770,9 @@ local function find_nearest_peak_in_cpl(pl,target,delta,start,speedratio,key)
 end
 
 
-function pattern_normalize(range,percent_pattern_match,use2xlf)
+function pattern_normalize(range,percent_pattern_match,use2XLF)
   percent_pattern_match=percent_pattern_match or 30
-  use2xlf=use2xlf or false
+  use2XLF=use2XLF or false
   local peak_quality=machine.scale  -- defines minimum mpct for use calculating speed (fans have short peaks and need smaller mpct)
   if peak_quality~=0 then 
     peak_quality=10^(peak_quality/20)
@@ -800,7 +808,12 @@ function pattern_normalize(range,percent_pattern_match,use2xlf)
       table.insert(speeds,sp)
     end  
   end
-  table.sort(speeds,function (a,b) return a<b end)
+  table.sort(speeds,function (a,b) return a<b end)  
+  if #ff>=1 then 
+    for _,f in ipairs(ff) do
+      debugprint('order='..f.order..', speed='..f.speed..', tag='..f.tag)
+    end
+  end
   --
   -- determine if the train is fixed speed (i.e ac motor drive) or variable speed (i.e. turbine drives)
   --
@@ -808,11 +821,11 @@ function pattern_normalize(range,percent_pattern_match,use2xlf)
   local close=.002
   local speedissync=is_a_multiple(machine.speed,machine.linef,close) 
   local searchrange= range or machine.vspeed/100*2
-  local normalize={range=range,pattern_match=percent_pattern_match,use_2xLF=use2xlf}
+  local normalize={range=range,pattern_match=percent_pattern_match,use_2XLF=use2XLF}
   if not(fixedspeed) then  -- if the train is not fixed speed then open up the search range
     close=.002
     searchrange=2*searchrange
-    use2xlf=true
+    use2XLF=true
   end
   local freq1x=0
   local sr1xs={}
@@ -838,7 +851,6 @@ function pattern_normalize(range,percent_pattern_match,use2xlf)
           local pattern={}
           local ptrn={}
           if #ff>=1 then 
-
             -- build pattern table
             for _,f in ipairs(ff) do
               local ord=f.speed/e.speedratio*f.order 
@@ -848,7 +860,6 @@ function pattern_normalize(range,percent_pattern_match,use2xlf)
               table.insert(pattern,tonumber(ord))
             end
             table.sort(pattern,function (a,b) return a<b end)
-
             -- get the data ranges
             local dataranges={}
             for _,ds in ipairs(e.data.spec.normal[string.sub( ax,1,1)]) do
@@ -901,11 +912,11 @@ function pattern_normalize(range,percent_pattern_match,use2xlf)
               maxct=0
               --  determine the part of the pattern that can be used for each dataset
               pat={}
-              local lowlimit=.05 
+              local lowlimit=.02 
               for _,p in ipairs(pattern) do
-                lowlimit=.05 
+                lowlimit=.02 
                 if #pattern==1 and d==1 then lowlimit=0 end
-                if d>1 then lowlimit=dataranges[d-1].orders*1.02/dr.orders end
+                if d>1 then lowlimit=dataranges[d-1].orders*.9/dr.orders end
                 if p>lowlimit*dr.orders and p<dr.orders*.98 then
                   table.insert(pat,p)
                 end
@@ -914,9 +925,9 @@ function pattern_normalize(range,percent_pattern_match,use2xlf)
                 pat={}
                 for _,p in ipairs(pattern) do
                   if dr.orders/dataranges[d-1].orders <= 15 then
-                    lowlimit=dataranges[d-1].orders*1.02//3
+                    lowlimit=dataranges[d-1].orders*1.02/dr.orders/3
                   else 
-                    lowlimit=dr.orders/20
+                    lowlimit=dr.orders*.04
                   end
                   if p>lowlimit and p<dr.orders*.98 then
                     table.insert(pat,p)
@@ -941,31 +952,32 @@ function pattern_normalize(range,percent_pattern_match,use2xlf)
                 for p,pk1 in ipairs (peaks) do                    -- subject peaks
                   if pk1.sord/e.speedratio>dr.orders then break end  -- peak beyond data range
                   if pk1.sord>=lastorders and pk1.sord/e.speedratio<=dr.orders then -- peak in data range
-                    for s,sp in ipairs (speeds) do                    -- speeds of each shaft
-                      if (dr.orders/(sp/e.speedratio) < 600 and sp~=1) or sp==1 then
-                        local harms=dr.orders/(sp/e.speedratio)*.98
+                    for s,sp in ipairs (pat) do                    -- speeds of each shaft
+                      spd=sp --/e.speedratio
+                      if (dr.orders/spd < 600 and sp~=1) or sp==1 then
+                        local harms=dr.orders/spd*.98
                         for  i=1,harms,1 do -- harmonic of interest
                           -- is subject peak 1x (peak freq/shaft speed/harmonic) in the search range of machine 1x and the same dataset
-                          if (pk1.sfreq/(sp/e.speedratio))/i>mspeed*(1-searchrange) and (pk1.sfreq/(sp/e.speedratio))/i<mspeed*(1+searchrange)  then 
+                          if (pk1.sfreq/spd)/i>mspeed*(1-searchrange) and (pk1.sfreq/spd)/i<mspeed*(1+searchrange)  then 
                             local te=0
                             local ct=0
                             local lastindx=1
                             for _,pt in ipairs (pat) do -- pt is the orders to normalize on
-                              local strtindx=find_nearest_peak_in_cpl(peaks,(pk1.sord/(sp/e.speedratio))/i*pt,0,lastindx)
+                              local strtindx=find_nearest_peak_in_cpl(peaks,(pk1.sord/spd)/i*pt,0,lastindx)
                               for indx=strtindx,#peaks,1 do 
                                 local pk2=peaks[indx]
                                 if pk2.sord>=lastorders and pk2.sord/e.speedratio<=dr.orders  then
-                                  if pk2.sord*.98>(pk1.sord/(sp/e.speedratio))/i*pt then goto nextptrn end
+                                  if pk2.sord*.98>(pk1.sord/spd)/i*pt then goto nextptrn end
                                   lastindx=ind
                                   --
                                   -- is this peak a multiple of the subject peak 1x * pattern order
                                   --
-                                  local itismult,mult,rmdr=z_is_a_multiple((pk1.sord/(sp/e.speedratio))/i*pt,pk2.sord,close) 
-                                  local pk2is2xlfmult=is_a_multiple(2*machine.linef,pk2.sfreq,.005)
+                                  local itismult,mult,rmdr=z_is_a_multiple((pk1.sord/spd)/i*pt,pk2.sord,close) 
+                                  local pk2is2XLFmult=is_a_multiple(2*machine.linef,pk2.sfreq,.005)
                                   --
                                   -- is subject peak prominant and is this peak slighty significant and not the noise floor
                                   --
-                                  if itismult and mult==1 and pk1.mpct>peak_quality and (pk2.mpct>.2 and pk2.sval>minamp+6) and (speedissync or (not(speedissync) and (not(pk2is2xlfmult) or use2xlf ))) then
+                                  if itismult and mult==1 and pk1.mpct>peak_quality and (pk2.mpct>.2 and pk2.sval>minamp+6) and (speedissync or (not(speedissync) and (not(pk2is2XLFmult) or use2XLF ))) then
                                     ct=ct+1
                                     local pe=(pk2.sval+pk2.mdif)*pk1.mpct -- peak quality weighted energy
                                     if pt==1 and #pat<=3 then -- added 'and #pat<3' to remove weighting on complex drivetrains 
@@ -982,18 +994,18 @@ function pattern_normalize(range,percent_pattern_match,use2xlf)
                             if te*ct>=maxte and ct>=maxct and ct~=0 --[[ and sp/e.speedratio>=spd ]] then 
                               local ffwgt=1
                               local tagmatch=''
-                              for _,f in ipairs (ff) do
-                                if i==f.order and sp==f.speed then ffwgt=3;tagmatch=f.tag..' - '..round(i,3)..'x'..round(sp,3)..'X';break end
-                              end 
+                              --for _,f in ipairs (ff) do
+                              -- if i==f.order and sp==f.speed then ffwgt=3;tagmatch=f.tag..' - '..round(i,3)..'x'..round(sp,3)..'X';break end
+                              --end 
                               mt=i
-                              spd=(sp/e.speedratio)
+                              --spd=(sp/e.speedratio)
                               index=p
-                              sord=(pk1.sord/(sp/e.speedratio))/i
-                              freq1x=(pk1.sfreq/(sp/e.speedratio))/i
+                              sord=(pk1.sord/spd)/i
+                              freq1x=(pk1.sfreq/spd)/i
                               sbin=pk1.sbin
                               maxte=te*ct*ffwgt
                               maxct=ct
-                              debugprint(">>> pk: "..p..'  '..i..' x '..round((spd),3)..' tone freq: '..round(pk1.sfreq,1)..' ord: '.. round ((pk1.sfreq/(sp/e.speedratio))/i,3)..' rpm: '..round (freq1x*60,1)..' mxte: '..round(maxte,4)..' ct: '..ct..' '..maxct..' mpct:'..round(pk1.mpct,3)..' spd sft rpm: '..round ((pk1.sfreq/(sp/e.speedratio))/i*60/e.speedratio,1),tagmatch )
+                              debugprint(">>> pk: "..p..'  '..i..' x '..round((spd),3)..' tone freq: '..round(pk1.sfreq,1)..' ord: '.. round ((pk1.sfreq/spd)/i,3)..' rpm: '..round (freq1x*60,1)..' mxte: '..round(maxte,4)..' ct: '..ct..' '..maxct..' mpct:'..round(pk1.mpct,3)..' spd sft rpm: '..round ((pk1.sfreq/spd)/i*60/e.speedratio,1),tagmatch )
                             end  -- how many matches
                           end  -- is calculated 1x in searchranges
                         end -- harmonic of interest
@@ -1006,7 +1018,7 @@ function pattern_normalize(range,percent_pattern_match,use2xlf)
                 --
                 if freq1x>0 and maxct>0 and (#pat<=3 or (#pat>3 and maxct>=math.ceil (#pat*(percent_pattern_match/100)))) then
                   table.insert (sr1x,{sfreq=freq1x,pk_index=index,sord=sord,speed=e.speedratio,dsi=dr.dsi,sbin=sbin})
-                  debugprint('mi: '..ei..' axis: '..axis..' order: '..round(sord,2)..'x at '..round(freq1x,1)..'hz from '..round(freq1x*mt*spd,2)..'/('..mt..'*'..round(spd*e.speedratio,3)..')  '..maxct..'/'..#pat.." FO pattern "..' RPM '..round(freq1x*60,1),round(dr.orders)..'x range',round(freq1x*60/e.speedratio,1), mt)
+                  debugprint('mi: '..ei..' axis: '..axis..' order: '..round(sord,2)..'x at '..round(freq1x,1)..'hz from '..round(freq1x*mt*spd,2)..'/('..mt..'*'..round(spd--[[*e.speedratio]],3)..')  '..maxct..'/'..#pat.." FO pattern "..' RPM '..round(freq1x*60,1),round(dr.orders)..'x range',round(freq1x*60/e.speedratio,1), mt)
                   lastspeed=freq1x
                   speedfound=true
                 else
@@ -1043,3 +1055,160 @@ function pattern_normalize(range,percent_pattern_match,use2xlf)
   return sr1xs
 
 end-- function
+--
+function harm_energy_normalize()
+
+  -- Harmonic energy normalization for item with only 1 item in the pattern, 1x
+  -- Finds the tone in the peak list in the search range with the most highest harmonic energy
+  -- on the assumtion that the shaftrate series will have the highest harmonic energy
+  --
+  local sss = machine.supershafts
+  local speeds = compute_super_shaft_speeds(sss, machine.ispeed, 1.0 )
+
+  local fff = MakeForcingOrdersForSuperShafts(sss, true )
+  local ff={}      
+  for i,sp in ipairs(fff) do
+    for _,en in ipairs(sp) do
+      if speeds[i] ~= nil then
+        table.insert(ff,{speed=speeds[i],order=en.order,tag=en.tag})
+      end
+    end
+  end
+  -- remove duplicate speeds
+  if #speeds>1 then
+    local spds={}
+    for _,sp in ipairs(speeds) do
+      spds[sp]=true
+    end
+    speeds={}
+    for sp,_ in pairs(spds) do
+      table.insert(speeds,sp)
+    end  
+  end
+  table.sort(speeds,function (a,b) return a<b end)
+  --
+  -- determine if the train is fixed speed (i.e ac motor drive) or variable speed (i.e. turbine drives)
+  --
+  local fixedspeed=fixed_speed()
+  local close=.002
+  local speedissync=is_a_multiple(machine.speed,machine.linef,close) 
+  local searchrange= range or machine.vspeed/100*2
+  local normalize={range=range,pattern_match=percent_pattern_match,use_2XLF=use2XLF}
+  if not(fixedspeed) then  -- if the train is not fixed speed then open up the search range
+    close=.002
+    searchrange=2*searchrange
+  end
+  local freq1x=0
+  local sr1xs={}
+  local sr1x={}
+  --
+  debugprint()
+
+  -- Drill into peaklist
+  local mi,axis
+  for ei,e in ipairs(machine.elements) do
+    mi=ei
+    if e~=nil and e.data~=nil and e.data.spec~=nil and e.data.spec.cpl~=nil and e.data.spec.cpl.normal~=nil  then 
+      local mspeed=machine.speed*e.speedratio
+      for ax,mia in pairs (e.data.spec.cpl.normal) do
+        if string.len(ax)>1 then -- work on _norm
+          axis=string.sub(ax,1,1)
+          debugprint('Normalizing to machine speed '..round((machine.speed*(1-machine.vspeed/100))*60,1)..' - '..round((machine.speed*(1+machine.vspeed/100))*60,1) .. ' rpm     shaft speed: '..round(machine.speed*e.speedratio*60,1))
+          sr1x={}  
+          freq1x=0
+
+          local speedfound=false
+
+          local orders={}
+          --
+          -- Build an info list for peaks in harmonic energy sort from peak list
+          --
+          if mia.sorts.harm_energy=={} then
+            table.insert(orders,{pk_index=nil,  sord=nil, sfreq=nil,harms=nil, mi=mi,axis=axis,speed=e.speedratio})
+          else
+            for h,he in ipairs(mia.sorts.harm_energy) do
+              local harms={}
+              local f1x=mia.peaks[he].sfreq
+              local ord=f1x/(machine.speed*e.speedratio)
+              for p,pi in ipairs(mia.peaks[he].harm_pk_index) do
+                table.insert (harms,{order=round(mia.peaks[tonumber(pi)].sfreq/f1x),sfreg=mia.peaks[tonumber(pi)].sfreq,pk_index=pi})
+              end
+              table.insert(orders,{pk_index=he,  sord=ord, harms=harms ,sfreq=mia.peaks[he].sfreq, mi=mi,axis=axis,speed=e.speedratio})
+            end
+          end
+          local matches={}
+          local ratios={}
+          -- look for the first match within vspeed% of faster speed shafts then slower speed shaft 
+          for i,he in ipairs(orders) do
+            speedfound=false
+            mi=he.mi or 'No mi'
+            axis=he.axis or 'No axis'
+            if he.sord~=nil then
+              if #speeds>1 then
+                -- multishaft machine
+                for j,sp in ipairs(speeds) do
+                  local ratio=(sp/e.speedratio)
+                  for m=1,3 do  -- m is used to look for high order harmonic series of shaft speed
+                    -- check for match to secondary speed shaft 
+                    local itis,mult,rmdr=z_is_a_multiple(ratio,he.sord,searchrange) 
+                    if itis and mult==m then
+                      local spd=ratio*e.speedratio
+                      table.insert(matches,{freq=he.sfreq/(ratio*m),ratio=ratio,m=m,sord=he.sord/(ratio*m),speed=he.speed,pk_index=he.pk_index})
+                      ratios[ratio]=true
+                    end
+                  end --for m=1,3
+                end -- for j,sp
+              else -- if #speed
+                -- single shaft machine
+                for m=1,3 do-- m is used to look for high order harmonic series of shaft speed
+                  -- primary shaft 
+                  local itis,mult,rmdr=z_is_a_multiple(1,he.sord,searchrange) 
+                  if itis and mult==m then
+                    table.insert (sr1x,{sfreq=he.sfreq/m,mi=he.mi,axis=he.axis,pk_index=he.pk_index,sord=he.sord/m,speed=he.speed})
+                    debugprint('order: '..round(he.sord/m,3)..'x at '..round(he.sfreq/m,2)..'hz from '..round(he.sfreq,3).." primary shaft "..round(he.sfreq/m,3)..' RPM: '..round(he.sfreq/m*60,2), m)
+                    speedfound=true
+                    goto nxtmia
+                  end
+                end --for m=1,3
+              end -- if #speeds>1
+            end --if he.sord~=nil
+          end --for i,he
+          if #speeds>1 then
+            for i,m1 in ipairs(matches) do
+              if #matches==1 or #ratios==1 then
+                table.insert (sr1x,{sfreq=m1.freq,mi=mia.mi,axis=mia.axis,pk_index=m1.pk_index,sord=m1.sord,speed=m1.speed})
+                debugprint('order: '..round (m1.sord,3)..'x at '..round(m1.freq,2)..'hz from '..round(m1.freq*m1.ratio,3).." single shaft match "..round(m1.freq/m1.m,3)..' RPM: '..round(m1.freq*60,2),m1.ratio)
+                speedfound=true
+                goto nxtmia
+              end
+              for j,m2 in ipairs(matches) do
+                if i~=j then
+                  local itis,mult,rmdr=z_is_a_multiple(m1.freq,m2.freq,.011) 
+                  if itis and mult==1 then--and m1.ratio~=m2.ratio then
+                    table.insert (sr1x,{sfreq=(m1.freq+m2.freq)/2,pk_index=m1.pk_index,sord=m1.sord,speed=m1.speed,dsi=m1.sdsi})
+                    debugprint('order: '..round(m1.sord,3)..'x at '..round((m1.freq+m2.freq)/2,2)..'hz from '..round((m1.freq+m2.freq)/2*m1.ratio,3).." multiple shafts "..round(((m1.freq+m2.freq)/2)/m1.m,3)..' RPM: '..round((m1.freq+m2.freq)/2*60,2),m1.ratio,m2.ratio)
+                    speedfound=true
+                    goto nxtmia
+                  end
+                end --if i~=J 
+              end --for i,m2
+            end --for i,m1
+          end --if #speed>1
+          speedfound=false
+
+          if mi==nil or axis==nil then
+            debugprint('No speed match found')
+          else
+            debugprint('No speed match found for '..mi..' - '..axis)
+          end
+          table.insert (sr1x,{speed=e.speedratio})
+
+          ::nxtmia::
+debugprint()
+          table.insert(sr1xs,{found=speedfound,mi=mi,axis=axis,info=sr1x,shaftspeed=e.speedratio})
+        end -- is it '_norm' peaks
+      end --axis
+    end  -- is there data
+  end  -- elements
+  return sr1xs,orders
+end  -- function

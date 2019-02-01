@@ -16,6 +16,10 @@ local data_quality_fault_guids={
 
 local function data_quality_assert2(fault, severity, confidence)
   local f = assert( machine.quality_faults )
+  -- ToDo:
+  -- Keep a complimentary table for additional information for the fault.
+  --qfc[fault]={ melguid = { axis = true }}
+  -- It keeps melguid for the fault.  melguid is the key and value is a table with axis letters.
   f[fault]={["severity"]=severity,["conf"]=confidence}
 end
 

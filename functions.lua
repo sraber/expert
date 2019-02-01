@@ -1,4 +1,4 @@
-﻿-- functions.lua    Rev 69 1/11/19
+﻿-- functions.lua    Rev 70 1/31/19
 
 -- This is set in the do_xxx_analysis functions and used by get_infer_solution.
 local l_fault_analysis
@@ -551,6 +551,40 @@ local function make_composite_peak_table( tdsi,aves,noduplicates )
           end
         end
   end
+  local ds = machine.datasets[tdsi[1]]
+  if not(noduplicates) and ds.typ=='normal' then
+    ds=comp_peaks[1].sdsi
+    for pi,pk in ipairs(comp_peaks) do
+      -- add harmonics to tones for harmonic energy normalization
+      if pk.sdsi==ds then
+        local close=.002
+        local isshaftmult=false
+        local haveharm=false
+        local harms={}
+        local henrgy=0
+        for hpi,hpk in ipairs(comp_peaks) do
+          local bw
+          bw=machine.datasets[hpk.sdsi].bw/machine.datasets[hpk.sdsi].speed
+          if hpk.sord/pk.sord>20 then close=.0008 end
+          local nextiscloser=false
+          local isharm,m,r=is_a_multiple(pk.sord,hpk.sord,close)
+          if hpi+1<#comp_peaks then
+            local nisharm,nm,nr=is_a_multiple(pk.sord,comp_peaks[hpi+1].sord,close)
+            nextiscloser=nisharm and nm==m and nr<r
+          end
+          if isharm and pk.sord/bw>3 and m<21 and not (nextiscloser) then
+            henrgy=henrgy+hpk.sval 
+            table.insert(harms,hpi)
+          end
+        end
+        if #harms>0 then
+          haveharm=true
+          pk['harm_pk_index']=harms
+          pk['harm_energy']=henrgy
+        end
+      end
+    end
+  end
   return comp_peaks
 end
 
@@ -654,6 +688,9 @@ end
 --       valued index into the list.  Store identified forcing orders along with other identifing information prescribed by the
 --       Peak Matching algorithm reletive to the index into the Extracted Peak list.
 function initialize_data( norm )
+  -- normalize1 - Finds the closest peak to target speed
+  -- normalize2 - Pattern match normalization
+  -- normalize3 - Looks for harmonic series of all shafts that are target speed or harmonics of target speed
   norm = norm or normalize2
   -- Make a table of shaft number <- to -> dataset, organized by timestamp.  It'll make things more organized.
   -- The timestamps of the datasets are not needed here, we already have them, but we need an easy way to get at
@@ -785,7 +822,6 @@ function initialize_data( norm )
 
   for ei,e in ipairs(machine.elements) do
     if e.data~=nil and e.data.spec~=nil then
-
       -- determine element's component index and shaftspeed ratio
       local comp_index
       for ci, cmp in ipairs(machine.components) do 
@@ -798,7 +834,6 @@ function initialize_data( norm )
         end
       end 
       e['speedratio']=g_comp_speed_ratio[comp_index]
-
       local composites_table = {}
       for typ,axes in pairs(e.data.spec) do
         local typ_table = {}
@@ -807,6 +842,20 @@ function initialize_data( norm )
             if typ=="normal" then
               local aves=e.data.spec['average'][ax]
               typ_table[ax..'norm'] ={peaks= make_composite_peak_table(tdsi, aves,false )} -- build non composite (complete) peaklist for normalizing 
+              -- build sorted list of normal peak list items
+              local num=20
+              local function sort_items(a,b) return a.item>b.item end
+              local he={}
+              if #typ_table[ax..'norm'].peaks>0 then
+                for j, pk in ipairs (typ_table[ax..'norm'].peaks) do  
+                  if pk.harm_energy~=nil and pk.harm_energy>0 then 
+                    table.insert (he , {index=j,item=pk.harm_energy}) 
+                  end
+                end
+              end 
+              _,he=sort_pk_items(he)
+              typ_table[ax..'norm']['sorts']={harm_energy=he}
+
               typ_table[ax] ={peaks= make_composite_peak_table(tdsi, aves,true)}
             else
               typ_table[ax] ={peaks= make_composite_peak_table(tdsi, {} )}
@@ -1295,7 +1344,7 @@ function initialize_data( norm )
               local lf=false
               if s>nspeeds then 
                 close=.0008
-                sbindex='2xLF'
+                sbindex='2XLF'
                 lf=true
               end
               local haveside=false
@@ -1526,8 +1575,7 @@ function put_store_value( tag, value )
   ssto[tag] = value
 end
 
-function increment_store_counter( tag, value )
-  value = value or 1
+function increment_store_counter( tag )
   local check,count = get_store_value(tag)
   if check==true then
     count = count + 1
@@ -1535,6 +1583,7 @@ function increment_store_counter( tag, value )
     count = 1
   end
   put_store_value( tag, count )
+  return count
 end
 
 function decrement_store_counter( tag )
@@ -1546,6 +1595,31 @@ function decrement_store_counter( tag )
     count = 0
   end
   put_store_value( tag, count )
+  return count
+end
+
+function increment_store_value( tag, value )
+  value = value or 1
+  local check,count = get_store_value(tag)
+  if check==true then
+    count = count + value
+  else
+    count = value
+  end
+  put_store_value( tag, count )
+  return count
+end
+
+function decrement_store_value( tag, value )
+  value = value or 1
+  local check,count = get_store_value(tag)
+  if check==true then
+    count = count - value
+  else
+    count = -value
+  end
+  put_store_value( tag, count )
+  return count
 end
 ---------------------------------------------------------------
 --get_comps_all
@@ -3981,7 +4055,8 @@ function analyze_harmonic_by_tag_cpl( tag, shaft_tag_index, shaft_data_index, ax
                 ["pct"]   = (sr-ar)/ar,
                 ["mdif"]  = (s-m), 
                 ["mpct"]  = (sr-mr)/mr,
-                ['matches']=pl.peaks[harm].matches
+                  ['matches']=pl.peaks[harm].matches,
+                  ['flags']=pl.peaks[harm].flags
                 } )
           else
             table.insert( ret_matches, { 
@@ -3994,11 +4069,13 @@ function analyze_harmonic_by_tag_cpl( tag, shaft_tag_index, shaft_data_index, ax
                 ["sdsi"]  = pl.peaks[harm].sdsi,
                 ["mdif"]  = (s-m), 
                 ["mpct"]  = (s-m)/m,
-                ['matches']=pl.peaks[harm].matches
+                ['matches']=pl.peaks[harm].matches,
+                ['flags']=pl.peaks[harm].flags
                 } ) 
           end 
         end -- if order>1
       end --- for h,harm
+        break
     end -- if mtch
   end -- for i,pk 
 
@@ -4010,7 +4087,180 @@ function analyze_harmonic_by_tag_cpl( tag, shaft_tag_index, shaft_data_index, ax
 end
   
   --====================================================================
-  
+-- analyze_sidebands_by_tag_cpl
+-- Notes:
+--    This function compares "normal" spectrum data to "average" data.  
+--    It looks for the shaftrate or LF sidebands of the input tag.
+-- Input:
+--    tag               : a forcing order tag
+--    sbtag             : 1X or 2XLF
+--    shaft_tag_index   : shaft index position of the tag
+--    shaft_data_index  : shaft index position of the data
+--    axis              : data axis (r,a, or t)
+-- Output:
+--    result  - A table with the following entries:
+--        found   : true or false.  If false no other entries in table.
+--        orders  : the maximum harmonic order found, some lower orders may be missing
+--        count   : the number of entries in the matches table
+--        matches : a table with data about each harmonic match
+--           Each entry in the matches table has the following entries:
+--                sval  : current spectra value
+--                mval  : current spectra moving average value
+--                aval  : average value
+--                sord  : the position of the identified tag in orders of rotation in the signal
+--                aord  : the position of the identified tag in orders of rotation in the average data
+--                sfreq : the position of the identified tag in frequency in the signal
+--                sdsi  : the data set index, use with machine.dataset
+--                adsi  : the average data set index, use with machine.dataset
+--                sbin  : the position of the identified tag in bins in the signal
+--                abin  : the position of the identified tag in bins in the average
+--                dif   : the differance (sval - aval)
+--                pct   : percent difference between sval and aval
+--                mdif   : the differance (sval - mval)
+--                mpct   : percent difference between sval and mval
+--                sidebands:   An output table with the above information for 1x or 2XLF sidebands of this peak
+--
+  function analyze_sidebands_by_tag_cpl( tag, sbtag,shaft_tag_index, shaft_data_index, axis ) 
+    local element = shaft_tag_index
+    local brg = shaft_data_index
+    local strtag=string.upper(tag)
+    local ele = get_element(brg)
+    local pl = safe_spec_cpl( ele, "normal", axis )
+    local shaftspeed=ele.speedratio
+    local harms={}
+    local result={}
+    local sbt=sbtag or '1X'
+    local sideord=1
+    if sbt=='1X' then
+      sbt=round(1/shaftspeed,3)..'x'
+      sideord=1/shaftspeed
+    elseif sbt=='2XLF' then
+      sideord=(2*machine.linef)/pl.shaftspeed.ave
+    end
+    local ti=check_get_order_tag_index(strtag,shaft_tag_index,nil,true)   
+    if not ti then
+      return {found=false}
+    end
+    local ret_matches = {}
+    local max_order = 0 
+    for i,pk in pairs (pl.peaks) do
+      local mtch = find_tag_in_matches( strtag, ti, pk.matches )
+      if mtch then
+        for h,harm in ipairs(pk.harm_pk_index) do 
+          local sb_matches={}
+
+          if pl.peaks[harm].sidebands~=nil and pl.peaks[harm].sidebands[sbt]~=nil then
+            for s, sb in ipairs(pl.peaks[harm].sidebands[sbt]) do 
+              local order1=round(pl.peaks[sb].sord/pl.peaks[harm].sord)
+              local sideband=round((pl.peaks[sb].sord-pl.peaks[harm].sord)/sideord)
+              if sb ~= harm then
+                local sr = pl.peaks[sb].sval
+                local mr = pl.peaks[sb].mval
+                local s = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), sr )
+                local m = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), mr )
+                local ar = pl.peaks[sb].aval
+                if ar~=nil then
+                  local a = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ar )
+                  table.insert( sb_matches, { 
+                      ["order"] = order1,
+                      ['sidebandnumber']=sideband,
+                      ["sval"]  = s, 
+                      ["mval"]  = m, 
+                      ["sord"]  = pl.peaks[sb].sord, 
+                      ["sfreq"] = pl.peaks[sb].sfreq,
+                      ["sbin"]  = pl.peaks[sb].sbin,
+                      ["sdsi"]  = pl.peaks[sb].sdsi,
+                      ["aval"]  = a, 
+                      ["aord"]  = pl.peaks[sb].aord,
+                      ["abin"]  = pl.peaks[sb].abin,
+                      ["adsi"]  = pl.peaks[sb].adsi,
+                      ["dif"]   = (s-a), 
+                      ["pct"]   = (sr-ar)/ar,
+                      ["mdif"]  = (s-m), 
+                      ["mpct"]  = (sr-mr)/mr,
+                      ['matches']=pl.peaks[sb].matches,
+                      ['flags']=pl.peaks[sb].flags
+                      } )
+                else
+                  table.insert( sb_matches, { 
+                      ["order"] = order1,
+                      ['sidebandnumber']=sideband,
+                      ["sval"]  = s, 
+                      ["mval"]  = m, 
+                      ["sord"]  = pl.peaks[sb].sord, 
+                      ["sfreq"] = pl.peaks[sb].sfreq,
+                      ["sbin"]  = pl.peaks[sb].sbin,
+                      ["sdsi"]  = pl.peaks[sb].sdsi,
+                      ["mdif"]  = (s-m), 
+                      ["mpct"]  = (s-m)/m,
+                      ['matches']=pl.peaks[sb].matches,
+                      ['flags']=pl.peaks[sb].flags
+                      } ) 
+                end  
+              end  -- order>= 1
+            end  -- ipair(.sidebands)
+          end -- .sidebands~=nil
+          local order=round(pl.peaks[tonumber(harm)].sord/pl.peaks[i].sord)
+          -- if order>=1 then
+          if order> max_order then max_order = order end
+          local sr = pl.peaks[harm].sval
+          local mr = pl.peaks[harm].mval
+          local s = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), sr )
+          local m = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), mr )
+          local ar = pl.peaks[harm].aval
+          if ar~=nil then
+            local a = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ar )
+            table.insert( ret_matches, { 
+                ["order"] = order,
+                ["sval"]  = s, 
+                ["mval"]  = m, 
+                ["sord"]  = pl.peaks[harm].sord, 
+                ["sfreq"] = pl.peaks[harm].sfreq,
+                ["sbin"]  = pl.peaks[harm].sbin,
+                ["sdsi"]  = pl.peaks[harm].sdsi,
+                ["aval"]  = a, 
+                ["aord"]  = pl.peaks[harm].aord,
+                ["abin"]  = pl.peaks[harm].abin,
+                ["adsi"]  = pl.peaks[harm].adsi,
+                ["dif"]   = (s-a), 
+                ["pct"]   = (sr-ar)/ar,
+                ["mdif"]  = (s-m), 
+                ["mpct"]  = (sr-mr)/mr,
+                ['matches']=pl.peaks[harm].matches,
+                ['flags']=pl.peaks[harm].flags,
+                ['sidebands']=sb_matches
+                } )
+          else
+            table.insert( ret_matches, { 
+                ["order"] = order,
+                ["sval"]  = s, 
+                ["mval"]  = m, 
+                ["sord"]  = pl.peaks[harm].sord, 
+                ["sfreq"] = pl.peaks[harm].sfreq,
+                ["sbin"]  = pl.peaks[harm].sbin,
+                ["sdsi"]  = pl.peaks[harm].sdsi,
+                ["mdif"]  = (s-m), 
+                ["mpct"]  = (s-m)/m,
+                ['matches']=pl.peaks[harm].matches,
+                ['flags']=pl.peaks[harm].flags,
+                ['sidebands']=sb_matches
+                } ) 
+          end 
+          --end -- if order>1
+        end --- for h,harm
+        break
+      end -- if mtch
+    end -- for i,pk 
+    result["shaftspeed"] = shaftspeed
+    result["orders"] = max_order
+    result["count"] = #ret_matches
+    result["matches"] = ret_matches
+    result['found']=true
+    return result
+  end
+--
+
+--====================================================================
 -- this function evaluates a tone to determine is it is likely cross talks from another source
   function cross_talk(element,brg,axis,pk_index,key,ct_limit)
     ct_limit=ct_limit or 12
@@ -4106,7 +4356,7 @@ end
       local sbg=pl.peaks[indx].sidebands
       local lfsb=false
       for g,gr in ipairs (sbg) do
-        if gr['2xLF']~=nil then lfsb=true end
+        if gr['2XLF']~=nil then lfsb=true end
       end
       if sv>=sval_th then
         if string.match(flag,'m')==nil and string.match(flag,'s')==nil and string.match(flag,'h')==nil and string.match(flag,'l')==nil and string.match(flag,'f')==nil and string.match(flag,'x')==nil and not(lfsb) then

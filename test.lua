@@ -1,4 +1,5 @@
--- test.lua    Rev 6     4/30/18 
+-- test.lua    Rev 6     5/8/18 
+
 
 -- Error descriptions
 err_des={}
@@ -27,7 +28,7 @@ local function round(number , places)
 end
 --
 function write(a, file)
-  if not (g_no_printing) then 
+  if not (g_debugprinting) then --mod erw 
     local out = assert( io.open(file,"w") )
     for index,value in ipairs(a) do
       out:write( value, "\n" )
@@ -38,7 +39,7 @@ end
 --
 function writedy(a, file,step, ds) -- added step to aid building freq column
   --debugprint (a, file,step, ds.speed) 
-  if not (g_no_printing) then 
+  if not (g_debugprinting ) then --mod erw g_no_printing
     local dsspeed=1
     local matches=nil
     local avedata 
@@ -201,7 +202,7 @@ function writedy(a, file,step, ds) -- added step to aid building freq column
 --
   function printelements( eles )
     for i,e in pairs(eles) do
-      debugprint( "--- element["..i.."].guid="..e.guid )
+      debugprint( "--- element["..i.."].guid="..guid_name(e.guid) )
       debugprint( "--- forders ----")
       printfo( e.forders )
       debugprint("--- attr ---")
@@ -232,7 +233,7 @@ function writedy(a, file,step, ds) -- added step to aid building freq column
   end
 --
   function writedata()
-    if not (g_no_printing) then 
+    if not (g_debugprinting) or false then --mod erw g_no_printing
       for i,t in ipairs(machine.datasets) do
         if t.dom == 'spec' then
           if t.typ=="average" then
@@ -395,8 +396,8 @@ function writedy(a, file,step, ds) -- added step to aid building freq column
         debugprint( "Faults for Shaft Number "..sn )
         debugprint( string.format("%-8s %-8s %-36s", "severity", "confidence", "fault guid" ) )
         for fg,v in pairs(f) do
-          if cf then out:write( "[\""..fg.."\"]={severity="..v.severity..",conf="..v.conf.."},","\n" ) end
-          debugprint( string.format("%.2f %.2f %-36s", v.severity, v.conf, fg ) )
+          if cf then out:write( "[\""..guid_name(fg).."\"]={severity="..v.severity..",conf="..v.conf.."},","\n" ) end
+          debugprint( string.format("%-8.2f %-8.2f %-36s", v.severity, v.conf, guid_name(fg) ) )
         end
         if cf then out:write( "},","\n" ) end
       end
@@ -411,10 +412,10 @@ function writedy(a, file,step, ds) -- added step to aid building freq column
       debugprint("")
       for sn,t in pairs(g_r_failed) do
         debugprint("")
-        debugprint( "Shaft GUID: "..machine.components[sn].shaft )
+        debugprint( "Shaft GUID: "..guid_name(machine.components[sn].shaft) )
         debugprint( string.format("%-18s %-14s %-16s %s","rule guid","code","message","stack trace [file name:function name( line number )]@[next stack level]") )
         for _,r in pairs(t) do
-          debugprint(string.format("%-18s %-14s %-16s %s",r.guid,err_des[r.code],r.message,r.trace))
+          debugprint(string.format("%-18s %-14s %-16s %s",guid_name(r.guid),err_des[r.code],r.message,r.trace))
         end
       end
     end
@@ -425,12 +426,13 @@ function writedy(a, file,step, ds) -- added step to aid building freq column
       for sn,f in ipairs(lists) do
         if f.vms_index ~= lastmi then 
           debugprint() 
-          debugprint ("#        sval    dif   sev     bin    order    sfreq  MI      axis    fo_info        Info                        FO   "..--[[                                  vfa_guid                                vhs_guid_shaft                          vmel_guid                               vmel_datasource                    ]]"   vms_index")
+          debugprint ("#        sval    dif    sev     bin     order   sfreq data.mi  axis     fo_info          Info                          "..--[[                                  vfa_guid                                vhs_guid_shaft                          vmel_guid                               vmel_datasource                    ]]"       brg.mi")
           --debugprint ("#       sval    dif     bin    order    sfreq   MI      axis    fo_info   Info                     FO                                  vfa_guid                                vhs_guid_shaft                          vmel_guid                               vmel_datasource            vms_index")  
         end
         lastmi=f.vms_index
         local of=tonumber(f.orderfreq) or 1
-        local freq=round(f.orderlow*of,2)
+        local freq=0
+        if f.orderlow~=nil then freq=round(f.orderlow*of,2) end
         if string.match(f.info,"BBN")==nil then
           freq=round(of,3)
         end
@@ -443,7 +445,7 @@ function writedy(a, file,step, ds) -- added step to aid building freq column
         end
         --if not (f.dif>=10 or  f.sval>=85) then break end
           if f.orderhigh==nil then
-            debugprint( sn,round(f.sval,2),round(f.dif,2),round(f.sev,1),round(f.sbin,2), round(f.orderlow,3).."X",freq,f.data_mi,f.axis,f.fo_info, f.info--[[,f.vfa_guid, f.vhs_guid_shaft,  f.vmel_guid  , f.vmel_datasource ]],  f.vms_index  )
+          debugprint( sn,round(f.sval,2),round(f.dif,2),round(f.sev,1),round(f.sbin,2), round(f.orderlow,1).."X",freq,f.data_mi,f.axis,f.fo_info, f.info--[[,f.vfa_guid, f.vhs_guid_shaft,  f.vmel_guid  , f.vmel_datasource ]],  f.vms_index  )
             --debugprint( sn,round(f.sval,2),round(f.dif,2),round(f.sbin,2), round(f.orderlow,3).."X",freq,f.data_mi,f.axis,f.fo_info, f.info,f.vfa_guid, f.vhs_guid_shaft,  f.vmel_guid  , f.vmel_datasource ,  f.vms_index  )
           else
 

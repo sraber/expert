@@ -109,7 +109,7 @@ g_std_multiply =0
 -- Specifies the amount to multiply mean.
 -- This is another way to control what is called a signifigant peak, the higher the value
 -- the higher the threshold for a peak to be considered.
-g_mean_multiply = 1.7  -- changed from 2 on 12/28/18 because obvious fat peaks were not being identified
+g_mean_multiply = 1.5    -- changed from 2 on 12/28/18 because obvious fat peaks were not being identified
 
 
 g_peak_group_threshold = 24  -- threshold for flagging harmonic and sideband severity
@@ -121,6 +121,8 @@ g_fault_tones= {} -- The place the tones that caused rules to fire are stored
 
 g_fault_tones_xml="" 
 
-g_fault_tone_threshold = 6 -- 10 --  any tone over with dif  greater than this is added to fault severity and the fault tone list no matter the amplitude
+g_fault_tone_threshold = 10 -- 10 --  any tone over with dif  greater than this is added to fault severity and the fault tone list no matter the amplitude
 
-g_significance_threshold = 60 -- 70  -- amplitiude theshold for low dif (>3)peaks
+g_significance_threshold = 70 -- 70  -- amplitiude theshold for low dif (>3)peaks
+
+
