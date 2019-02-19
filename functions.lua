@@ -1,4 +1,4 @@
-﻿-- functions.lua    Rev 70 1/31/19
+﻿-- functions.lua    Rev 71 2/19/19
 
 -- This is set in the do_xxx_analysis functions and used by get_infer_solution.
 local l_fault_analysis
@@ -220,7 +220,7 @@ end
 function create_speed_table()
   local st = {}
   for _,ds in ipairs(machine.datasets) do
-    if ds.dom=="spec" and ds.typ=="normal" and st[ds.sid]==nil then
+    if ds.dom=="spec" and ( ds.typ=="normal" or ds.typ=="demod") and st[ds.sid]==nil then
       st[ds.sid]=ds.speed
       debugprint(ds.speed)
     end
@@ -552,7 +552,7 @@ local function make_composite_peak_table( tdsi,aves,noduplicates )
         end
   end
   local ds = machine.datasets[tdsi[1]]
-  if not(noduplicates) and ds.typ=='normal' then
+  if comp_peaks[1]~=nil and noduplicates==false and ds.typ=='normal' then
     ds=comp_peaks[1].sdsi
     for pi,pk in ipairs(comp_peaks) do
       -- add harmonics to tones for harmonic energy normalization

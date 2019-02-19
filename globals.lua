@@ -1,15 +1,15 @@
--- include.lua    Rev 11     1/11/19
+-- include.lua    Rev 11     2/6/19
 
 vds_core_name ='Standard Lib'
 vds_core_id = '23C66D33-CC90-43A3-827A-EE0F983DE649'
-vds_core_version ='1.0.2'
+vds_core_version ='1.0.3'
 
 -- Warning level 
 -- 0 - Nada, niente, rien, nothing, no warnings
 -- 1 - All warnings except for: forcing orders, attribute tags, or missing data, and no rule map
 -- 2 - All warnings except for: missing data
 -- 3 - All warnings
-g_warning_level = 1
+g_warning_level = 3
 
 -- turns off all unnessecary printing to increase processing speed.
 g_debugprinting= true
