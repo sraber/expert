@@ -1,4 +1,4 @@
-﻿-- functions.lua    Rev 71 2/19/19
+﻿-- functions.lua    Rev 72 3/12/19
 
 -- This is set in the do_xxx_analysis functions and used by get_infer_solution.
 local l_fault_analysis
@@ -1962,7 +1962,9 @@ local function asn_rule_info(o, t, w )
   for att, val in pairs(t) do
     local vt = type(val)
     if vt=='number' or vt=='string' then
-      str = str .. att .. '=\"' .. val .. '\" ' -- the space in last part is important.
+      if not (att=='message' or att=='code' or att=='trace') then
+         str = str .. att .. '=\"' .. val .. '\" ' -- the space in last part is important.
+      end
     end
   end
   str = str .. '/>'
@@ -2131,7 +2133,7 @@ local function asn_element( k, t, w )
   for key, val in pairs(t.data.spec) do
     if key=="cpl" then
       asn_cpl_type( val, ls )
-    elseif key=="demod" or key=="average" or key=="normal" then
+    elseif g_warning_level>=4 and (key=="demod" or key=="average" or key=="normal") then
       asn_spec_type( key, val, ls )
     end
   end
@@ -2304,7 +2306,7 @@ end
 
 -- get_infer_solution
 -- Notes:
---   This is the public function used to retrieve the 
+--   This is the public function used to retrieve the inference solution.
   function get_infer_solution()
     as_add_infer_output()
     local w = {xml = '<root version=\"' .. infer_solution_version ..'\" >' }

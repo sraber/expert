@@ -1,4 +1,4 @@
--- infer.lua    Rev 10     1/11/19
+-- infer.lua    Rev 11     3/12/19
 
 -- This provides a default engineering unit for a rule.  This is
 -- not the desired way to define the rule unit.  It should be defined 
@@ -156,7 +156,7 @@ function infer( do_analysis )
   g_infer_rules_passed = shaft_rules_passed
   g_infer_rules_failed = shaft_rules_failed
   g_infer_rules_warn = shaft_rules_warn
-  if g_warning_level > 1 then
+  if g_warning_level >= 4 then
     g_rule_map = {}
   else
     g_rule_map = nil
