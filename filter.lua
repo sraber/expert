@@ -1,4 +1,4 @@
--- filter.lua    Rev 3 10/23/18
+-- filter.lua    Rev 4 9/4/19
 
 -- The # operator only works on arrays.  It's crazy, but a known issue for Lua.
 -- Lua is a beautiful language and we can deal with this one small problem.
@@ -137,6 +137,17 @@ local function get_component_possess( eles, cns, test_function )
   return shafts
 end
 
+-- get_component_possess_array
+-- Input:
+--    eles - Element array.  Unit offset array of machine element indexes.
+--           Presumably the elements of the current component.
+--    cns - A list of component numbers in searchable format.  Format: {ni=true,nk=true,...}
+--    test_function - A test function from above: am_i_part_of_them or are_they_part_of_me
+-- Return:
+--    A table of component numbers in searchable format. 
+--    Format: { 3=true, 4=true,.. }
+-- Notes:
+--
 local function get_component_possess_array( eles, cns, test_function )
   local comps={}
   -- There may be more than one like component.
@@ -661,43 +672,164 @@ end
 --====================== Global Filter Functions ==========================
 --
 
-function get_comps_on_line( )
-  local ss = assert( machine.supershafts[g_super_shaft_number], "Parameter Error: Incorrect Super Shaft index" )
+-- get_comps_on_line
+-- Input:
+--    comp_number - [optional] A component number.
+-- Return:
+--    A table of shaft guids in searchable format. 
+--    Format: { guid=true, guid=true,.. }
+-- Notes:
+--    The return is a list of unique shaft guids that are on the same
+--    super shaft as the input component.
+-- Errors:
+--    It will return an error if called on a composite.
+--
+function get_comps_on_line( comp_number )
+  local cn = comp_number or g_shaft_number
+  local cp = assert( machine.components[cn], "Parameter Error: Component number not valid." )
+  check_arg( cp.comp > 0, "get_comps_on_line not allowed to be called on a composite component." )
+  local ssi = find_super_shaft_with_component( machine.supershafts, cn )
+  check_arg( ssi>0, "Machine Component Number: "..cn.." was not found in any super shaft" )
+  local ss = machine.supershafts[ssi]
   return get_component_map(ss.components)
 end
 
-function get_comps_on_line_array( )
-  local ss = assert( machine.supershafts[g_super_shaft_number], "Parameter Error: Incorrect Super Shaft index" )
+-- get_comps_on_line_array
+-- Input:
+--    comp_number - [optional] A component number.
+-- Return:
+--    A table of component guids in searchable format. 
+--    Format: { [cn]=true, [cn]=true,.. }
+-- Notes:
+--    The return is a list of component numbers that are on the same
+--    super shaft as the input component.
+-- Errors:
+--    It will return an error if called on a composite.
+--
+function get_comps_on_line_array( comp_number )
+  local cn = comp_number or g_shaft_number
+  local cp = assert( machine.components[cn], "Parameter Error: Component number not valid." )
+  check_arg( cp.comp > 0, "get_comps_on_line not allowed to be called on a composite component." )
+  local ssi = find_super_shaft_with_component( machine.supershafts, cn )
+  check_arg( ssi>0, "Machine Component Number: "..cn.." was not found in any super shaft" )
+  local ss = machine.supershafts[ssi]
   return ss.components
 end
 
-function get_comps_near( )
-  local ss = assert( machine.supershafts[g_super_shaft_number], "Parameter Error: Incorrect Super Shaft index." )
-  return get_component_map( assert( ss.c_to_c[g_shaft_number], "Parameter Error: Component number not on super shaft." ) )
+-- get_comps_near
+-- Input:
+--    comp_number - [optional] A component number.
+-- Return:
+--    A table of component guids in searchable format. 
+--    Format: { guid=true, guid=true,.. }
+-- Notes:
+--
+function get_comps_near( comp_number )
+  local cn = comp_number or g_shaft_number
+  local cp = assert( machine.components[cn], "Parameter Error: Component number not valid." )
+  if cp.comp > 0 then
+    local results = {}
+    for _, cpcn in ipairs(cp.cmap) do
+      local res = get_comps_near( cpcn )
+      for k,v in pairs(res) do
+        results[k] = v
+      end
+    end
+    return results
+  else
+    local ssi = find_super_shaft_with_component( machine.supershafts, cn )
+    check_arg( ssi>0, "Machine Component Number: "..cn.." was not found in any super shaft" )
+    local ss = machine.supershafts[ssi]
+    return get_component_map( assert( ss.c_to_c[cn], "Parameter Error: Component number not on super shaft." ) )
+  end
 end
 
-function get_comps_near_array( )
-  local ss = assert( machine.supershafts[g_super_shaft_number], "Parameter Error: Incorrect Super Shaft index." )
-  return assert( ss.c_to_c[g_shaft_number], "Parameter Error: Component number not on super shaft." )
+-- get_comps_near_array
+-- Input:
+--    comp_number - [optional] A component number.
+-- Return:
+--    A table of component guids in searchable format. 
+--    Format: { [2]=true, [4]=true,.. }
+-- Notes:
+--
+function get_comps_near_array( comp_number )
+  local cn = comp_number or g_shaft_number
+  local cp = assert( machine.components[cn], "Parameter Error: Component number not valid." )
+  if cp.comp > 0 then
+    local results = {}
+    for _, cpcn in ipairs(cp.cmap) do
+      local res = get_comps_near_array( cpcn )
+      for k,v in pairs(res) do
+        results[k] = v
+      end
+    end
+    return results
+  else
+    local ssi = find_super_shaft_with_component( machine.supershafts, cn )
+    check_arg( ssi>0, "Machine Component Number: "..cn.." was not found in any super shaft" )
+    local ss = machine.supershafts[ssi]
+    return assert( ss.c_to_c[cn], "Parameter Error: Component number not on super shaft." )
+  end
 end
 
-function get_comps_mine( )
-  -- REVIEW: If g_super_shaft_number is nil then this is probably a composite.
-  --         Check that, if it's not a composite then throw an error.
-  --         If it is a composite, then the 2nd parameter to get_component_possess should be
-  --         a table of all of the machine components in searchable format.  Might have to make
-  --         that table here.
-  local ss = assert( machine.supershafts[g_super_shaft_number], "Parameter Error: Incorrect Super Shaft index." )
-  return get_component_possess(  machine.components[g_shaft_number].map, 
-                                 assert( ss.c_to_c[g_shaft_number], "Parameter Error: Component number not on super shaft." ),
-                                 are_they_part_of_me
-                              )
+-- get_comps_mine
+-- Input:
+--    comp_number - [optional] A component number.
+-- Return:
+--    A table of component guids in searchable format. 
+--    Format: { guid=true, guid=true,.. }
+-- Notes:
+--
+function get_comps_mine( comp_number )
+  local cn = comp_number or g_shaft_number
+  local cp = assert( machine.components[cn], "Parameter Error: Component number not valid." )
+  if cp.comp > 0 then
+    local results = {}
+    for _, cpcn in ipairs(cp.cmap) do
+      local res = get_comps_mine( cpcn )
+      for k,v in pairs(res) do
+        results[k] = v
+      end
+    end
+    return results
+  else
+    local ssi = find_super_shaft_with_component( machine.supershafts, cn )
+    check_arg( ssi>0, "Machine Component Number: "..cn.." was not found in any super shaft" )
+    local ss = machine.supershafts[ssi]
+    return get_component_possess(  machine.components[cn].map, 
+                                   assert( ss.c_to_c[cn], "Parameter Error: Component number not on super shaft." ),
+                                   are_they_part_of_me
+                                )
+  end
 end
 
-function get_comps_mine_array( )
-  local ss = assert( machine.supershafts[g_super_shaft_number], "Parameter Error: Incorrect Super Shaft index." )
-  return get_component_possess_array(  machine.components[g_shaft_number].map, 
-                                 assert( ss.c_to_c[g_shaft_number], "Parameter Error: Component number not on super shaft." ),
-                                 are_they_part_of_me
-                              )
+-- get_comps_mine_array
+-- Input:
+--    comp_number - [optional] A component number.
+-- Return:
+--    A table of component guids in searchable format. 
+--    Format: { [2]=true, [4]=true,.. }
+-- Notes:
+--
+function get_comps_mine_array( comp_number )
+  local cn = comp_number or g_shaft_number
+  local cp = assert( machine.components[cn], "Parameter Error: Component number not valid." )
+  if cp.comp > 0 then
+    local results = {}
+    for _, cpcn in ipairs(cp.cmap) do
+      local res = get_comps_mine_array( cpcn )
+      for k,v in pairs(res) do
+        results[k] = v
+      end
+    end
+    return results
+  else
+    local ssi = find_super_shaft_with_component( machine.supershafts, cn )
+    check_arg( ssi>0, "Machine Component Number: "..cn.." was not found in any super shaft" )
+    local ss = machine.supershafts[ssi]
+    return get_component_possess_array(  machine.components[cn].map, 
+                                   assert( ss.c_to_c[cn], "Parameter Error: Component number not on super shaft." ),
+                                   are_they_part_of_me
+                                )
+  end
 end
