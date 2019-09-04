@@ -1,4 +1,4 @@
--- infer.lua    Rev 11     3/12/19
+-- infer.lua    Rev 12     8/2/19
 
 -- This provides a default engineering unit for a rule.  This is
 -- not the desired way to define the rule unit.  It should be defined 
@@ -72,7 +72,8 @@ local function MakeSecondaryRuleTable( comp, rls, primary_faults, priority )
   local comp_rules = {}
   -- Look for primary rules that have passed
   for _,r in pairs(rls) do
-    if r.prime==false and r.pri==priority and r.shaft==comp.shaft and primary_faults[r.fault]
+    if r.prime==false and r.pri==priority and r.shaft==comp.shaft 
+      and ( (r.autoprime~=nil and r.autoprime) or primary_faults[r.fault] )
       and (r.ort=="a" or (r.ort==comp.orient))
       and filter( r.filter_function, r.filter_parameters)  then
       debugprint( "load secondary rule: ", r.nmrule )

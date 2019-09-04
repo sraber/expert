@@ -1,5 +1,6 @@
 -- quality.lua    Rev 5 1/9/19
-
+--
+-- data_quality_fault_guids hold guids for quality faults that are pushed into outside of the rulebase.
 local data_quality_fault_guids={
   ['data ranges']='b064a670-ef2e-4226-93fb-6d2dee66c570',
   ['crest factor']='9674b678-418a-4d3c-ac24-a548bbce7cff',
@@ -11,8 +12,10 @@ local data_quality_fault_guids={
   ['speed change between pickups']='9fdf1b1a-dbaf-4078-9b5f-e1220ce1559a',
   ['speed change on pickup']='5ba9638c-72f2-4c20-ada0-299eeee6faa5',
   ['missing waveforms']='7a6e5c29-d253-4961-bf50-7040e30c0b0f',
+  ['missing demod']='0a41634d-34ff-4385-8d14-e8f96754ec84',
   ['higher range norm']='f067f248-ecb4-4b60-ae93-bb0a0917bb5e',
-  ['2xFL normalize']='8b4fe728-ae8f-4a7d-95cf-97eef2224650'}
+  ['2xlf normalize']='8b4fe728-ae8f-4a7d-95cf-97eef2224650',
+  ['swapped pickups']='9b1c43c8-3251-4603-a2b0-3b185d368c84'}
 
 local function data_quality_assert2(fault, severity, confidence)
   local f = assert( machine.quality_faults )
@@ -126,7 +129,7 @@ local function ds_avg_noise_by_order( start, stop, tdsi )
   return nil
 end
 --
-local function rms(data)
+function rms(data)
   local sumsqr,n,min,max=0,0,data[1],data[1]
   for _,d in ipairs(data) do
     min=math.min(min,d)
@@ -137,28 +140,31 @@ local function rms(data)
   return math.sqrt(sumsqr/n),min,max
 end
 --
-local function data_check_axis( data, ax, ei )
+local function data_check_axis( data, ax, ei,exerrors )
   local errors={}
   local faults={}
   -- spectral data checks
   local tndsi = data.spec.normal[ax]
-  local tadsi = data.spec.average[ax]
+  local tadsi={}
+  if data.spec.average~=nil then
+   tadsi = data.spec.average[ax]
+   end
   local function fmax_sort( idx1, idx2 )
     return machine.datasets[idx1].fmax< machine.datasets[idx2].fmax
   end
   if tndsi==nil or #tndsi==0 then
-    table.insert(errors,'Missing data - fewer normal spectral ranges than averages on axis: '..ax) 
+    table.insert(errors,'Missing data - no normal spectral data on axis: '..ax..ei) 
     faults[data_quality_fault_guids['data ranges']]=100
   else
     table.sort( tndsi, fmax_sort )
-    if tadsi==nil then 
+    if tadsi==nil or #tadsi==0 then 
       table.insert(errors,'Missing data - No averages on axis: '..ax) 
-      faults[data_quality_fault_guids['no averages']]=20
+      faults[data_quality_fault_guids['no averages']]=30
     else
       table.sort( tadsi, fmax_sort )
       local omin,omax,fmax,stop=0,0,0,0
       if #tndsi<#tadsi then 
-        table.insert(errors,'Missing data - fewer normal spectral ranges than averages on axis: '..ax) 
+        table.insert(errors,'Missing data - fewer normal spectral ranges than averages on axis: '..ax..ei) 
         faults[data_quality_fault_guids['data ranges']]=50
       else
         for i,adsi in ipairs (tadsi) do
@@ -204,12 +210,39 @@ local function data_check_axis( data, ax, ei )
       end
     end 
   end
+  -- demod data check
+  local dmdsi=data.spec.demod
+  local art={'a','r','t'}
+  local there=false
+  if dmdsi~=nil then
+    for _,ax in ipairs (art) do
+      if dmdsi[ax]~=nil and #dmdsi[ax]>0 then
+        there=true
+        break
+      end
+    end
+  end
+
+
+  if dmdsi==nil or not(there) then
+    local fired=false
+    for _,err in ipairs (exerrors) do
+      if err == 'Missing demod element: '..ei then 
+        fired=true
+        break
+      end
+    end
+    if not(fired) then
+      table.insert(errors,'Missing demod element: '..ei) 
+      faults[data_quality_fault_guids['missing demod']]=10
+    end
+  end
 
   -- Wave form data checks 
   local wdsi = data.time.normal[ax]
   local rmss={}
   if wdsi==nil or #wdsi==0 then
-    table.insert(errors,'Missing waveform(s) axis: '..ax) 
+    table.insert(errors,'Missing waveform(s) axis: '..ei..ax) 
     faults[data_quality_fault_guids['missing waveforms']]=10
   else
     for _,ds in ipairs(wdsi) do
@@ -220,7 +253,7 @@ local function data_check_axis( data, ax, ei )
       local ccrest=math.max(math.abs(cmx),math.abs(cmn))/crms
       if ccrest>=5 then 
         local sev=(ccrest-5)/5*100
-        table.insert(errors,'Crest Factor '..round(ccrest,1)..' axis: '..ax..' ds: '..ds) 
+        table.insert(errors,'Crest Factor '..round(ccrest,1)..' axis: '..ei..ax..' ds: '..ds) 
         faults[data_quality_fault_guids['crest factor']]=sev
       end
       local _
@@ -234,9 +267,9 @@ function data_quality()
   local faults,errors={},{}
   debugprint ("<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< Data Quality Check Started >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
   for ei,data in pickup_pairs(machine.elements) do
-    if data.spec~=nil and data.spec.normal~=nil and data.spec.average~=nil then
+    if data.spec~=nil and data.spec.normal~=nil --[[and data.spec.average~=nil]] then
       for _,ax in ipairs(axis) do
-        local fault,error = data_check_axis( data, ax, ei )
+        local fault,error = data_check_axis( data, ax, ei,errors )
         if #error > 0 then
           for _,err in ipairs(error) do
             table.insert(errors,err)
@@ -254,9 +287,24 @@ function data_quality()
     end
   end
   local _
+  local high,low,nh,nl=false,false,0,0
   for _,err in ipairs(errors) do
+    if string.match(err,'higher than')=='higher than' then
+      high=true
+      nh=nh+1
+    end
+    if string.match(err,'lower than')=='lower than' then 
+      low=true
+      nl=nl+1
+    end
+
     debugprint(err)
   end
+  if high and low then
+     debugprint('Pickups possibly swapped - Both high and low signals detected') 
+     table.insert(errors,'Pickups possibly swapped - Both high and low signals detected')
+     data_quality_assert2(data_quality_fault_guids['swapped pickups'],10*(nh+nl),1)
+     end
   debugprint('**************************************************************************************')
   return errors
 end
@@ -275,7 +323,7 @@ function normalization_quality(errors,sr1xs)
   if sr1xs~=nil then
   for _,mia in ipairs(sr1xs) do
       if mia.normalize~=nil and mia.normalize.use_2xLF~=nil and mia.normalize.use_2xLF then
-        data_quality_assert2(data_quality_fault_guids['2xFL normalize'],26,1)
+        data_quality_assert2(data_quality_fault_guids['2xlf normalize'],26,1)
         table.insert(errors,'Warning - Data normalized without 2xLF suppression')
       end
     for _,inf in ipairs(mia.info) do
@@ -288,28 +336,29 @@ function normalization_quality(errors,sr1xs)
   end
   for ei,data in pickup_pairs(machine.elements) do
     local t,ts,n,min,max=0,0,0,1e999,0
-    if data.spec~=nil and data.spec.normal~=nil and data.spec.average~=nil then
+    if data.spec~=nil and data.spec.normal~=nil then
       local ssr=machine.elements[ei].speedratio
       for _,ax in ipairs (axis) do
         if data.spec.normal[ax]~=nil then
           for _,ds in ipairs (data.spec.normal[ax]) do
+            local speed=machine.datasets[ds].speed/ssr
             if first then 
-              min=machine.datasets[ds].speed/ssr
+              min=speed
               mmin=min
               first=false
             end
-            if machine.datasets[ds].speed/ssr~=0 then
-              max=math.max(max,machine.datasets[ds].speed/ssr)
-              min=math.min(min,machine.datasets[ds].speed/ssr)
+            if speed~=0 then
+              max=math.max(max,speed)
+              min=math.min(min,speed)
             end
             n=n+1
-            t=t+machine.datasets[ds].speed/ssr
+            t=t+speed
           end
         end
       end
       mt=mt+t
       mn=mn+n
-      pu[tostring(ei)]={t=t,n=n,min=min,max=max}
+      pu[tostring(ei)]={t=t,n=n,min=min,max=max,ave=t/n}
     end
     mmax=math.max(max,mmax)
     mmin=math.min(min,mmin)

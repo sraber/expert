@@ -1,4 +1,4 @@
--- include.lua    Rev 12     3/12/19
+-- include.lua    Rev 14    7/31/19
 
 vds_core_name ='Standard Lib'
 vds_core_id = '23C66D33-CC90-43A3-827A-EE0F983DE649'
@@ -18,7 +18,7 @@ g_debugprinting= true
 -- Turns off normalization so data is processed at dataset speeds (manual or ea values)
 -- Note: normalize0 can be passed into initialize_data to turn off normalization as well.
 --       initialize_data( normalize0 )
-g_normalize=true
+
 
 -- This will be set to a table of resulting faults detected by
 -- the fault rule base.
@@ -91,7 +91,7 @@ g_stop_band_threshold = 1E-7
 -- target position may be converted to bins and the range in bins will vary based on
 -- bin width and shaft speed.  The range is used to search for a peak
 -- when looking for a match to a forcing order.
-g_peak_margin = 5.0 
+g_peak_margin = 5.5 
 
 -- Specifies the multiplier that produces a search range (+-) in bins.  We often
 -- need to convert from Orders to Bin and that is based on a value for shaft speed
@@ -113,7 +113,7 @@ g_std_multiply =0
 g_mean_multiply = 1.5    -- changed from 2 on 12/28/18 because obvious fat peaks were not being identified
 
 
-g_peak_group_threshold = 24  -- threshold for flagging harmonic and sideband severity
+g_peak_group_threshold = 15  -- threshold for flagging harmonic and sideband severity
 
 ---
 -- Rulebase Functions Globals
@@ -125,5 +125,9 @@ g_fault_tones_xml=""
 g_fault_tone_threshold = 10 -- 10 --  any tone over with dif  greater than this is added to fault severity and the fault tone list no matter the amplitude
 
 g_significance_threshold = 70 -- 70  -- amplitiude theshold for low dif (>3)peaks
+
+g_no_ave_ff_spec=110 -- Spec for forcing frequencies on machines withou averages (reference amplitude for constantaccelspec)
+
+g_no_ave_non_ff_spec=100  -- Spec for non-forcing frequencies on machines withou averages (reference amplitude for constantaccelspec)
 
 

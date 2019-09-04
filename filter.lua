@@ -682,6 +682,11 @@ function get_comps_near_array( )
 end
 
 function get_comps_mine( )
+  -- REVIEW: If g_super_shaft_number is nil then this is probably a composite.
+  --         Check that, if it's not a composite then throw an error.
+  --         If it is a composite, then the 2nd parameter to get_component_possess should be
+  --         a table of all of the machine components in searchable format.  Might have to make
+  --         that table here.
   local ss = assert( machine.supershafts[g_super_shaft_number], "Parameter Error: Incorrect Super Shaft index." )
   return get_component_possess(  machine.components[g_shaft_number].map, 
                                  assert( ss.c_to_c[g_shaft_number], "Parameter Error: Component number not on super shaft." ),

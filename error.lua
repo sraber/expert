@@ -1,4 +1,4 @@
--- error.lua    Rev 3     12/13/18
+-- error.lua    Rev 4     7/13/19
 -------------------------------------------------------------------------
 --     Error Codes
 E_SHAFT_TAG_INDEX   = 1
@@ -96,6 +96,13 @@ end
 
 function check_arg( logic, msg )
   if not logic then error(M_PARAM_ARG(msg,4)) end
+end
+
+function safe_value( test_value, error_formatter, ... )
+  if test_value==nil then
+    error(error_formatter(...,4))
+  end
+  return test_value
 end
 
 function safe_value_1( test_value, error_formatter, error_formatter_input1 )

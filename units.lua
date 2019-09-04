@@ -1,4 +1,7 @@
--- Units.lua    Rev 2     11/28/17
+-- Units.lua    Rev 3     5/16/19
+
+local PI = 3.14159265359
+local PI2 = 9.86960440109
 
 UnitType =
     {	
@@ -23,6 +26,7 @@ UnitType =
 
 Unit =
     {
+    U_NONE	        = {id=-1,typ=UnitType.UT_NONE,base=0},
     U_USER_DEFINED	= {id=0,typ=UnitType.UT_USER_DEFINED,base=0},
 
     U_M	            = {id=11,typ=UnitType.UT_DISPLACEMENT,base=11}, -- This starts at 1 for a reason.
@@ -101,14 +105,14 @@ Unit =
   
   local function GetBaseUnit( unit )
     local id = unit.base
-    for i,u in pairs(Unit) do
+    for _,u in pairs(Unit) do
       if id==u.id then return u end
     end
     assert(nil,"unit not found.  unit id="..id)
   end
   
   function GetUnitFromId( id )
-    for i,u in pairs(Unit) do
+    for _,u in pairs(Unit) do
       if id==u.id then return u end
     end
     assert(nil,"unit not found.  unit id="..id)
@@ -263,21 +267,84 @@ local function GetDbRef(u)
   end
 end
 
--- REVIEW: Can consider integration but for now only convert
---         if same type.
+local function IntegrateUnitType(unit_type)
+  if( unit_type==UnitType.UT_ACCELERATION   ) then return UnitType.UT_VELOCITY     end
+  if( unit_type==UnitType.UT_VELOCITY       ) then return UnitType.UT_DISPLACEMENT end
+  if( unit_type==UnitType.UT_FLOW           ) then return UnitType.UT_VOLUME       end
+  return UnitType.UT_NONE
+end
+
+local function DifferentiateUnitType(unit_type)
+  if( unit_type==UnitType.UT_VELOCITY       ) then return UnitType.UT_ACCELERATION end
+  if( unit_type==UnitType.UT_DISPLACEMENT   ) then return UnitType.UT_VELOCITY     end
+  if( unit_type==UnitType.UT_VOLUME         ) then return UnitType.UT_FLOW         end
+  return UnitType.UT_NONE
+end
+
+local function DifferentiateUnit(eu)
+  if( eu.id==Unit.U_MM_SEC.id   ) then  return Unit.U_MM_SEC2   end
+  if( eu.id==Unit.U_M_SEC.id    ) then  return Unit.U_M_SEC2    end
+  if( eu.id==Unit.U_UM_SEC.id   ) then  return Unit.U_UM_SEC2   end
+  if( eu.id==Unit.U_IN_SEC.id   ) then  return Unit.U_IN_SEC2   end
+  if( eu.id==Unit.U_FT_SEC.id   ) then  return Unit.U_FT_SEC2   end
+  if( eu.id==Unit.U_MILS_SEC.id ) then  return Unit.U_MILS_SEC2 end
+  if( eu.id==Unit.U_MM.id       ) then  return Unit.U_MM_SEC    end
+  if( eu.id==Unit.U_M.id        ) then  return Unit.U_M_SEC     end
+  if( eu.id==Unit.U_UM.id       ) then  return Unit.U_UM_SEC    end
+  if( eu.id==Unit.U_IN.id       ) then  return Unit.U_IN_SEC    end
+  if( eu.id==Unit.U_FT.id       ) then  return Unit.U_FT_SEC    end
+  if( eu.id==Unit.U_MILS.id     ) then  return Unit.U_MILS_SEC  end
+  return Unit.U_NONE
+end
+
+local function IntegrateUnit(eu)
+  if( eu.id==Unit.U_G.id        ) then return Unit.U_M_SEC     end
+  if( eu.id==Unit.U_M_SEC2.id   ) then return Unit.U_M_SEC     end
+  if( eu.id==Unit.U_MM_SEC2.id  ) then return Unit.U_MM_SEC    end
+  if( eu.id==Unit.U_UM_SEC2.id  ) then return Unit.U_UM_SEC    end
+  if( eu.id==Unit.U_IN_SEC2.id  ) then return Unit.U_IN_SEC    end
+  if( eu.id==Unit.U_FT_SEC2.id  ) then return Unit.U_FT_SEC    end
+  if( eu.id==Unit.U_MILS_SEC2.id) then return Unit.U_MILS_SEC  end
+  if( eu.id==Unit.U_MM_SEC.id   ) then return Unit.U_MM        end
+  if( eu.id==Unit.U_M_SEC.id    ) then return Unit.U_M         end
+  if( eu.id==Unit.U_UM_SEC.id   ) then return Unit.U_UM        end
+  if( eu.id==Unit.U_IN_SEC.id   ) then return Unit.U_IN        end
+  if( eu.id==Unit.U_FT_SEC.id   ) then return Unit.U_FT        end
+  if( eu.id==Unit.U_MILS_SEC.id ) then return Unit.U_MILS      end
+  return Unit.U_NONE
+end
+
 function CanTypeConvert( ut_from, ut_to )
-  return ut_from==ut_to
+  if( (ut_from==UnitType.UT_NONE) or (ut_to==UnitType.UT_NONE) ) then return false end
+  if( ut_from==ut_to )                                        then return true  end
+  if( ut_from==IntegrateUnitType(ut_to) )                     then return true  end
+  if( ut_from==IntegrateUnitType( IntegrateUnitType(ut_to)) ) then return true  end
+  if( ut_from==DifferentiateUnitType(ut_to) )                 then return true  end
+  if( ut_from==DifferentiateUnitType( DifferentiateUnitType(ut_to)) ) then return true end
+  return false
 end
 
 function CanUnitConvert( u_from, u_to )
   return CanTypeConvert( u_from.typ, u_to.typ )
 end
 
-function ConvertSpectrum( u_from, u_to, value )
+function ConvertSpectrum( u_from, u_to, value, at_hz )
+  at_hz = at_hz or 0
   assert( CanUnitConvert(u_from, u_to), "Units cannot convert"  )
   
-  local loc_val
-  local loc_from
+  local loc_val = value
+  local loc_from = u_from
+  local loc_to = u_to
+  local op = -3
+  
+  if(      u_to.typ==u_from.typ ) then op = 0 
+  elseif( u_to.typ==IntegrateUnitType(u_from.typ) ) then op = 1 
+  elseif( u_to.typ==DifferentiateUnitType(u_from.typ) ) then op = -1 
+  elseif( u_to.typ==IntegrateUnitType( IntegrateUnitType(u_from.typ)) ) then op = 2 
+  elseif( u_to.typ==DifferentiateUnitType( DifferentiateUnitType(u_from.typ)) ) then op = -2 end
+  assert( op ~= -3, "From / to unit types are incompatable"  )
+
+  if op ~= 0 then assert( at_hz > 0, "Frequency not provided or 0 hz for integration/differentiation"  ) end
 
   if IsDbUnit(u_from) then
     loc_val = InverseDb( GetDbRef(u_from), value)
@@ -287,16 +354,41 @@ function ConvertSpectrum( u_from, u_to, value )
     loc_from = u_from
   end
 
-  local cvrow = conversion[u_to.typ]
-  local ctbl = cvrow.ct
-  local cfcn = cvrow.cvr
-
   if IsDbUnit(u_to) then
-    local loc_to = GetBaseUnit(u_to)
-    return MakeDb( GetDbRef(u_to), cfcn( ctbl, loc_from, loc_to, value ) )
+    loc_to = GetBaseUnit(u_to)
   end
   
-  return cfcn( ctbl, loc_from, u_to, value )
+  if( op~=0 and loc_from.id==Unit.U_G.id ) then
+    local cvt = conversion[loc_from.typ]
+    loc_val = cvt.cvr( cvt.ct, loc_from, GetBaseUnit(loc_from.base), loc_val )
+  end
+
+  if(op==-2) then
+    local cvt = conversion[loc_to.typ]
+    loc_val = cvt.cvr( cvt.ct, DifferentiateUnit(DifferentiateUnit(loc_from)), loc_to, loc_val )
+    loc_val = 4 * PI2 * at_hz * at_hz * loc_val
+  elseif(op==-1) then
+    local cvt = conversion[loc_to.typ]
+    loc_val = cvt.cvr( cvt.ct, DifferentiateUnit(loc_from), loc_to, loc_val )
+    loc_val = 2 * PI * at_hz * loc_val
+  elseif(op==0) then
+    local cvt = conversion[loc_to.typ]
+    loc_val = cvt.cvr( cvt.ct, loc_from, loc_to, loc_val )
+  elseif(op==1) then
+    local cvt = conversion[loc_to.typ]
+    loc_val = cvt.cvr( cvt.ct, IntegrateUnit(loc_from), loc_to, loc_val )
+    loc_val = loc_val / ( 2 * PI * at_hz )
+  elseif(op==2) then
+    local cvt = conversion[loc_to.typ]
+    loc_val = cvt.cvr( cvt.ct, IntegrateUnit(IntegrateUnit(loc_from)), loc_to, loc_val )
+    loc_val = loc_val / ( 4 * PI2 * at_hz * at_hz )
+  end
+
+  if IsDbUnit(u_to) then
+    loc_val = MakeDb( GetDbRef(u_to), loc_val )
+  end  
+  
+  return loc_val
 end
 
 function ConvertTime( u_from, u_to, value )
