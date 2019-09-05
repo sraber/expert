@@ -687,7 +687,7 @@ end
 function get_comps_on_line( comp_number )
   local cn = comp_number or g_shaft_number
   local cp = assert( machine.components[cn], "Parameter Error: Component number not valid." )
-  check_arg( cp.comp > 0, "get_comps_on_line not allowed to be called on a composite component." )
+  check_arg( cp.comp == 0, "get_comps_on_line not allowed to be called on a composite component." )
   local ssi = find_super_shaft_with_component( machine.supershafts, cn )
   check_arg( ssi>0, "Machine Component Number: "..cn.." was not found in any super shaft" )
   local ss = machine.supershafts[ssi]
@@ -709,7 +709,7 @@ end
 function get_comps_on_line_array( comp_number )
   local cn = comp_number or g_shaft_number
   local cp = assert( machine.components[cn], "Parameter Error: Component number not valid." )
-  check_arg( cp.comp > 0, "get_comps_on_line not allowed to be called on a composite component." )
+  check_arg( cp.comp == 0, "get_comps_on_line not allowed to be called on a composite component." )
   local ssi = find_super_shaft_with_component( machine.supershafts, cn )
   check_arg( ssi>0, "Machine Component Number: "..cn.." was not found in any super shaft" )
   local ss = machine.supershafts[ssi]
