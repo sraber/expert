@@ -1,8 +1,8 @@
--- include.lua    Rev 14    7/31/19
+-- include.lua    Rev 15    9/11/19
 
 vds_core_name ='Standard Lib'
 vds_core_id = '23C66D33-CC90-43A3-827A-EE0F983DE649'
-vds_core_version ='1.0.3'
+vds_core_version ='1.0.4'
 
 -- Warning level 
 -- 0 - Nada, niente, rien, nothing, no warnings

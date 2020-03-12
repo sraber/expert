@@ -857,7 +857,7 @@ function pattern_normalize(range,percent_pattern_match,use2XLF)
   --
   -- determine if the train is fixed speed (i.e ac motor drive) or variable speed (i.e. turbine drives)
   --
-  local fixedspeed,mci=fixed_speed()
+  local fixedspeed,mtrci=fixed_speed()
   local close=.002
   local highhz,lowhz
   local speedissync=is_a_multiple(machine.speed,machine.linef,close) 

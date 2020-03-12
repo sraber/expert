@@ -1,4 +1,4 @@
-﻿-- functions.lua    Rev 84 8/13/19
+﻿-- functions.lua    Rev 86 12/20/19
 
 -- This is set in the do_xxx_analysis functions and used by get_infer_solution.
 local l_fault_analysis
@@ -56,14 +56,11 @@ function do_fault_analysis( fault_table, fault_ex_table )
   g_faults_or_recs = fault_table
 
   -- Copy the data quality faults to the fault table.
-  if fault_table~=nil and fault_table[1]~=nil then
-    local ft = fault_table[1]
-    for fg,fd in pairs(machine.quality_faults) do
-      ft[fg] = fd
-    end
+  -- whole_machine_comp_number will return the whole machine number or 1 if whole machine is not found.
+  local ft = fault_table[ whole_machine_comp_number() ]
+  for fg,fd in pairs(machine.quality_faults) do
+    ft[fg] = fd
   end
-
-
   --
 
   -- This  will only be called here in the do_fault_analysis function.  We want 
@@ -234,6 +231,17 @@ function create_speed_table()
   return st
 end
 
+function constantaccelspec(refval,order,reford,min) -- calculates a 6 dB per octave applitude reduction for a without average specification
+  reford=reford or 1
+  min=min or 60
+  local val=refval-10
+  if order>reford*.95 then
+    val= 20*math.log(reford/order,10)+refval
+  end
+  if val<min then val=min end
+  return val
+end
+
 function get_this_comp_number()
   return g_shaft_number
 end
@@ -250,6 +258,19 @@ function debugprint (...)  -- prints only if g_no_printing is false
   if g_debugprinting then print(...) end
 end 
 
+function whole_machine_comp_number()
+  check_arg( #machine.components > 0, "Error: There are no machine components to process.")
+  for key,value in ipairs(machine.components) do
+    if value.shaft=="11111111-0000-0000-0000-000000000000" then
+      return key
+    end
+  end
+  return 1
+end
+
+function whole_machine_comp_id()
+  return "11111111-0000-0000-0000-000000000000"
+end
 -- 
 -- get_machine_element
 -- Notes:
@@ -515,9 +536,8 @@ local function make_composite_peak_table( tdsi,aves,noduplicates )
               if bin >= min_bin then
                 idx=idx+1
                 s=ds_spline_value( ds, bin )
-                --s=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , s )
                 m=ds_spline_avg( ds, bin )
-                --m=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , m )
+                --m=
                 if noduplicates then
                   table.insert( comp_peaks, {
                       sbin=bin,
@@ -540,7 +560,8 @@ local function make_composite_peak_table( tdsi,aves,noduplicates )
                       harm_pk_index={} ,
                       elsewhere={},
                       fmax=ds.fmax ,
-                      order=round(ord,2)
+                      order=round(ord,2),
+                      eu=g_internal_unit.id
                     })
                 else
                   table.insert( comp_peaks, {
@@ -549,12 +570,13 @@ local function make_composite_peak_table( tdsi,aves,noduplicates )
                       sfreq=freq,
                       sord=ord,
                       pk_index=idx,
-                      sval=20*math.log(s/1e-6,10),
-                      mval=20*math.log(m/1e-6,10),
+                      sval=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , s ),
+                      mval=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , m ),
                       mdif=20*math.log((s/m),10),
                       mpct=((s-m)/m), 
                       fmax=ds.fmax ,
-                      order=round(ord,2)
+                      order=round(ord,2),
+                      eu=28
                     })
                 end
               end
