@@ -1,4 +1,4 @@
-﻿-- functions.lua    Rev 86 12/20/19
+﻿-- functions.lua    Rev 87dy 2/24/2020
 
 -- This is set in the do_xxx_analysis functions and used by get_infer_solution.
 local l_fault_analysis
@@ -61,6 +61,8 @@ function do_fault_analysis( fault_table, fault_ex_table )
   for fg,fd in pairs(machine.quality_faults) do
     ft[fg] = fd
   end
+
+
   --
 
   -- This  will only be called here in the do_fault_analysis function.  We want 
@@ -123,7 +125,7 @@ function write(a, file)
   out:close()
 end
 
-local function stanford_conf(c1,c2)
+function stanford_conf(c1,c2)
   if c1>0 then
     if c2>0 then
       return c1+c2-(c1*c2)
@@ -148,6 +150,18 @@ function round(number , places)
     return math.floor(number*mult+.5)/mult
   else 
     return math.ceil(number*mult-.5)/mult 
+  end
+end
+
+function roundnearest(number , nearest)
+  nearest=nearest or 1
+  if nearest==0 then return nil end
+  if number==nil then return nil end
+  --local round (mult=10^(places or 0)
+  if number>=0 then 
+    return math.floor(number/nearest+.5)*nearest
+  else 
+    return math.ceil(number/nearest-.5)*nearest 
   end
 end
 
@@ -195,9 +209,9 @@ function z_get_brg_and_data_set_speed_ratio(element,brg)
   --  brgmi=machine.components[g_shaft_number].map[1]
   --end 
   if g_comp_speed_ratio[cn]~=nil then
-    return brgmi,aliasmi,g_comp_speed_ratio[cn]/g_comp_speed_ratio[z_get_ci_from_mi(aliasmi)]
+    return brgmi,aliasmi,  g_comp_speed_ratio[cn]/g_comp_speed_ratio[z_get_ci_from_mi(aliasmi)] ,brgratio
   else
-    return brgmi,aliasmi,brgratio/g_comp_speed_ratio[z_get_ci_from_mi(aliasmi)]
+    return brgmi,aliasmi,brgratio/g_comp_speed_ratio[z_get_ci_from_mi(aliasmi)],brgratio
   end
 end
 
@@ -229,17 +243,6 @@ function create_speed_table()
     end
   end
   return st
-end
-
-function constantaccelspec(refval,order,reford,min) -- calculates a 6 dB per octave applitude reduction for a without average specification
-  reford=reford or 1
-  min=min or 60
-  local val=refval-10
-  if order>reford*.95 then
-    val= 20*math.log(reford/order,10)+refval
-  end
-  if val<min then val=min end
-  return val
 end
 
 function get_this_comp_number()
@@ -458,24 +461,13 @@ local function make_data_match_array( matches, keysup )
   return sysmatch
 end
 
-local function add_flag(flags,flag)
-  flags=flags or '-'
-  if flag==nil then return flags end
-  if string.match(flags,flag)~=flag then
-    if flags~='-' then
-      if string.find(flags,flag)==nil then flags=flags..','..flag end
-    else 
-      flags= flag
-    end
-  end
-  return flags
-end
-
+--
 -- make_composite_peak_table
 -- Input:
 --    tdsi - An array of data set index.  
 --
 local function make_composite_peak_table( tdsi,aves,noduplicates )
+--MOD SR 12/21/2019 added EU
   if noduplicates==nil then noduplicates = true end
 -- band width sort
   local function bw_sort( idx1, idx2 )
@@ -501,7 +493,7 @@ local function make_composite_peak_table( tdsi,aves,noduplicates )
     -- The if statement below insures we're not processing data of the same bin width.
     local lastbin=#ds.data
     -- some EA/EDM data is coming back too long (i.e. 1024 points instead of 900). This tests for it and sets a limit to peaks added from this dataset.
-    if math.floor(math.log(lastbin,2))==math.log(lastbin,2) then -- if lastbin is a power of 2 then change lastbin to niquist value
+    if math.floor(math.log(lastbin,2))==math.log(lastbin,2) and noduplicates then -- if lastbin is a power of 2 then change lastbin to niquist value
       lastbin=lastbin*(900/1024) 
     end
     local dsfmax=lastbin*ds.bw
@@ -531,14 +523,16 @@ local function make_composite_peak_table( tdsi,aves,noduplicates )
               freq=ds.bw*(bin-1)
               ord=freq/ds.speed
             end
+            if ds.typ=='normal' and b==1 then
+              local _
+            end
             if d==1 or ((d>1 and freq>lastmax and noduplicates) or (d>1 and not(noduplicates)))  then
               lastmax=freq
-              if bin >= min_bin then
-                idx=idx+1
+              if bin >= min_bin and (ds.typ~='normal' or (ds.typ=='normal'and freq>=15) or (ds.typ=='normal'and freq>=2 and freq<15 and bin>7 and ds.data[ math.floor(bin-6)]>1e-4))  then--ds_spline_value( ds, math.floor(bin-2) )>1e-7 then
                 s=ds_spline_value( ds, bin )
+                idx=idx+1
                 m=ds_spline_avg( ds, bin )
-                --m=
-                if noduplicates then
+                if noduplicates and s>=g_peak_threshold then
                   table.insert( comp_peaks, {
                       sbin=bin,
                       sdsi=dsi,
@@ -563,15 +557,15 @@ local function make_composite_peak_table( tdsi,aves,noduplicates )
                       order=round(ord,2),
                       eu=g_internal_unit.id
                     })
-                else
+                elseif not(noduplicates) then
                   table.insert( comp_peaks, {
                       sbin=bin,
                       sdsi=dsi,
                       sfreq=freq,
                       sord=ord,
                       pk_index=idx,
-                      sval=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , s ),
-                      mval=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , m ),
+                      sval=20*math.log(s/1e-6,10),
+                      mval=20*math.log(m/1e-6,10),
                       mdif=20*math.log((s/m),10),
                       mpct=((s-m)/m), 
                       fmax=ds.fmax ,
@@ -587,6 +581,9 @@ local function make_composite_peak_table( tdsi,aves,noduplicates )
         end
       end
     end
+  end
+  for pi,pk in ipairs(comp_peaks) do
+    pk.pk_index=pi
   end
   local ds = machine.datasets[tdsi[1]]
   if comp_peaks[1]~=nil and noduplicates==false and ds.typ=='normal' then
@@ -730,44 +727,53 @@ function add_flag(flags,flag)
 end
 
 -- local function to speed searching the peaklist by using frequency indexed list of peaklist indexes, pksearchlist, built in Initalize and passed in
-local function peaksearch(psl,ei,typ,ax,value,key,close)
+function peaksearch(psl,ei,typ,ax,value,key,close,dsi)
   key=key or 'ord'
   if string.match(key,'ord')=='ord' then key='ord' end
   if string.match(key,'bin')=='bin' then key='bin' end
-  local upper,lower,res=0,0,1
-  if key == 'ord' then res=.1 end
+  local upper,lower,res,rnd=0,0,1,0
+  if key == 'ord' then
+    res=.1 
+    rnd=1
+  end
   upper=math.ceil(value/res)*res
   lower=math.floor(value/res)*res
   if upper==lower then lower=nil end
   local ret={}
-  if lower~=nil and  psl[ei][typ][key][lower]~=nil and  psl[ei][typ][key][lower][ax]~=nil then
-    for _,pi in ipairs (psl[ei][typ][key][lower][ax]) do
-      table.insert(ret,pi)
+  if string.len(ax)==1 then
+    if lower~=nil and  psl[ei][typ][key][round(lower,rnd)]~=nil and  psl[ei][typ][key][round(lower,rnd)][ax]~=nil then
+      for _,pi in ipairs (psl[ei][typ][key][round(lower,rnd)][ax]) do
+        table.insert(ret,pi)
+      end
     end
-  end
-  if upper~=nil and psl[ei][typ][key][upper]~=nil and psl[ei][typ][key][upper][ax]~=nil then
-    for _,pi in ipairs (psl[ei][typ][key][upper][ax]) do
-      table.insert(ret,pi)
+    if upper~=nil and psl[ei][typ][key][round(upper,rnd)]~=nil and psl[ei][typ][key][round(upper,rnd)][ax]~=nil then
+      for _,pi in ipairs (psl[ei][typ][key][round(upper,rnd)][ax]) do
+        table.insert(ret,pi)
+      end
+    end
+  else
+    key='sfreq'
+    if lower~=nil and  psl[ei][typ][key][round(lower,rnd)]~=nil and  psl[ei][typ][key][round(lower,rnd)][ax]~=nil and psl[ei][typ][key][round(lower,rnd)][ax][dsi]~=nil then
+      for _,pi in ipairs (psl[ei][typ][key][round(lower,rnd)][ax][dsi]) do
+        table.insert(ret,pi)
+      end
+    end
+    if upper~=nil and psl[ei][typ][key][round(upper,rnd)]~=nil and psl[ei][typ][key][round(upper,rnd)][ax]~=nil and psl[ei][typ][key][round(upper,rnd)][ax][dsi]~=nil then
+      for _,pi in ipairs (psl[ei][typ][key][round(upper,rnd)][ax][dsi]) do
+        table.insert(ret,pi)
+      end
     end
   end
   if close==nil then return ret end -- return the list of peaks within the resolution of the list.
   if ret==nil or #ret==0 then return nil end
   -- find which peak is cosest and return the peak info
   if string.match(key,'ord')=='ord' then key='sord' end
-  if string.match(key,'bin')=='bin' then key='sbin' end
   if typ=='average' then
     if string.match(key,'ord')=='ord' then key='aord' end
-    if string.match(key,'bin')=='bin' then key='abin' end
   end
   local pl=machine.elements[ei].data.spec.cpl[typ][ax]
   for np,pi in ipairs(ret) do
     local pk=pl.peaks[pi]
-    local bw
-    if typ=='average' then
-      bw=machine.datasets[pk.sdsi].bw
-    else
-      bw=machine.datasets[pk.sdsi].bw/machine.datasets[pk.sdsi].speed
-    end
     local ispeak,m,r=is_a_multiple(value,pk[key],close)
     local nextiscloser=false
     if np+1<=#ret then
@@ -779,6 +785,31 @@ local function peaksearch(psl,ei,typ,ax,value,key,close)
     end
   end
   return nil
+end
+--
+-- This function clears the average peaklist from the CPL 
+function remove_aves_from_cpl() 
+  for ei,e in ipairs(machine.elements) do 
+    if e.data~=nil and e.data.spec~=nil and e.data.spec.cpl~=nil then
+      for typ,axes in pairs(e.data.spec.cpl) do
+        if typ=='average' then
+          machine.elements[ei].data.spec.cpl[typ]=nil
+        end
+      end
+    end
+  end
+end
+--
+-- calculates a 6 dB per octave applitude reduction for a without average specification
+function constantaccelspec(refval,order,reford,min) 
+  reford=reford or 1
+  min=min or 60
+  local val=refval-10
+  if order>reford*.95 then
+    val= 20*math.log(reford/order,10)+refval
+  end
+  if val<min then val=min end
+  return val
 end
 --
 -- Initialize Data
@@ -876,7 +907,7 @@ function initialize_data( norm )
         --NOTE: Remove small peaks.  This is a global control and has
         --        to be coordinated with the engineering unit of the data.
         --        Perhaps could be based on machine.scale . 
-        if (ds.typ~='demod' and v > g_peak_threshold) or (ds.typ=='demod' and 20*math.log((v-mv)/mv,10)>0) then
+        if (ds.typ~='demod' --[[and v > g_peak_threshold]]) or (ds.typ=='demod' and 20*math.log((v-mv)/mv,10)>0) then
           --debugprint( "Polished peak: ", pk, " value at peak: ", v )
           table.insert( peaks, pk ) 
         end
@@ -943,9 +974,13 @@ function initialize_data( norm )
       end 
       e['speedratio']=g_comp_speed_ratio[comp_index]
       local composites_table = {}
+      local lasttyp
       for typ,axes in pairs(e.data.spec) do
+        lasttyp=typ
         local typ_table = {}
-        if typ=="normal" --[[or typ=="average"]] or typ=="demod" then -- Just some insurance we work with known tables.
+        local avetbl={}
+        local avespeed=0
+        if typ=="normal" or typ=="average" or typ=="demod" then -- Just some insurance we work with known tables.
           for ax, tdsi in pairs(axes) do
             if typ=="normal" then
               local aves={}
@@ -966,13 +1001,81 @@ function initialize_data( norm )
               end 
               _,he=sort_pk_items(he)
               typ_table[ax..'norm']['sorts']={harm_energy=he}
-
               typ_table[ax] ={peaks= make_composite_peak_table(tdsi, aves,true)}
+              local average={peaks= make_composite_peak_table(tdsi, {} )}
+              local _
+              for pi,pk in ipairs(average.peaks) do
+                local rnd=round(2*machine.datasets[pk.sdsi].bw,1) 
+                if rnd==0 then rnd=.5 end
+                local rnd2=10^round(math.log(machine.datasets[pk.sdsi].bw,10))
+                if pk.mpct>1.5 then 
+                  if avetbl[roundnearest(pk.sfreq,rnd)]==nil then
+
+                    avetbl[roundnearest(pk.sfreq,rnd)]={rnd=rnd,sfreq=pk.sfreq,tot=pk.sval, n=1}  -- dy added for super low ranges 2/7/2020
+                  else
+                    local tot=avetbl[roundnearest(pk.sfreq,rnd)].tot+pk.sval
+                    local n=avetbl[roundnearest(pk.sfreq,rnd)].n+1
+                    local sfreq=avetbl[roundnearest(pk.sfreq,rnd)].sfreq+pk.sfreq
+                    avetbl[roundnearest(pk.sfreq,rnd)]={rnd=rnd,sfreq=sfreq,tot=tot, n=n}
+                  end
+                end
+              end
             elseif typ=='demod' then
               typ_table[ax] ={peaks= make_composite_peak_table(tdsi, {} )}
-            else
-              -- typ_table[ax] ={peaks= make_composite_peak_table(tdsi, {} )} -- average peak list
+            elseif typ=='average' then
+              --typ_table[ax] ={peaks= make_composite_peak_table(tdsi, {} )} -- average peak list
+              local average={peaks= make_composite_peak_table(tdsi, {} )}
+              local sr=e.speedratio
+              avespeed=avespeed
+              for pi,pk in ipairs(average.peaks) do
+                local bw=machine.datasets[pk.sdsi].bw*sr 
+                local rnd
+                if bw<1 then 
+                  rnd=round(2*bw,-math.floor(math.log(bw,10)))/2
+                else
+                  rnd=round(2*bw,-round(math.log(bw,10)))/2
+                end
+
+                if pk.mpct>1.5 then 
+                  if avetbl[roundnearest(pk.sord*sr,rnd)]==nil then
+
+                    avetbl[roundnearest(pk.sord*sr,rnd)]={rnd=rnd,sord=pk.sord*sr,tot=pk.sval, n=1,mpct=pk.mpct,sfreq=pk.sfreq}
+                  else
+                    local tot=avetbl[roundnearest(pk.sord*sr,rnd)].tot+pk.sval
+                    local n=avetbl[roundnearest(pk.sord*sr,rnd)].n+1
+
+                    local sfreq=avetbl[roundnearest(pk.sord*sr,rnd)].sfreq+pk.sfreq
+                    local sord=avetbl[roundnearest(pk.sord*sr,rnd)].sord+pk.sord*sr
+                    local mpct=avetbl[roundnearest(pk.sord*sr,rnd)].mpct+pk.mpct
+                    avetbl[roundnearest(pk.sord*sr,rnd)]={rnd=rnd,sord=sord,tot=tot, n=n,mpct=mpct,sfreq=sfreq}
+                  end
+                end
+              end
             end
+          end
+          if typ=='average' and avetbl~=nil then 
+            for fr,pk in pairs(avetbl) do
+              local n=pk.n
+              local sord=pk.sord/n
+              local sval=pk.tot/n
+              pk.sord=sord
+              pk.sval=sval
+              pk.mpct=pk.mpct/n
+              pk.sfreq=pk.sfreq/n
+            end
+            typ_table={ave=avetbl}
+            local _
+          end
+          if typ=='normal' and avetbl~=nil then 
+            for fr,pk in pairs(avetbl) do
+              local n=pk.n
+              local sfreq=pk.sfreq/n
+              local sval=pk.tot/n
+              pk.sfreq=sfreq
+              pk.sval=sval
+            end
+            typ_table['ave']=avetbl
+            local _
           end
         end
         composites_table[typ] = typ_table
@@ -980,17 +1083,113 @@ function initialize_data( norm )
       e.data.spec["cpl"] = composites_table
     end
   end
+  for ei,e in ipairs(machine.elements) do
+    if e.data~=nil and e.data.spec~=nil and e.data.spec.cpl~=nil then
+      pksearchlist[ei]={}
+      for typ,axes in pairs(e.data.spec.cpl) do
+        if typ=='normal' then
+          pksearchlist[ei][typ]={}
+          pksearchlist[ei][typ]['sfreq']={}
+          for ax, pl in pairs(axes) do
+            if string.len(ax)>1 and ax~='ave' then
+              for _,dsi in ipairs(e.data.spec.normal[string.sub(ax,1,1)]) do
+                for pi,pk in ipairs(pl.peaks) do
+                  -- build frequency indexed search list 
+                  if pk.sdsi==dsi then
+
+                    if pksearchlist[ei][typ]['sfreq'][round(pk.sfreq,0)]==nil then pksearchlist[ei][typ]['sfreq'][round(pk.sfreq,0)]={} end
+                    if pksearchlist[ei][typ]['sfreq'][round(pk.sfreq,0)][ax]==nil then pksearchlist[ei][typ]['sfreq'][round(pk.sfreq,0)][ax]={} end
+                    if pksearchlist[ei][typ]['sfreq'][round(pk.sfreq,0)][ax][dsi]==nil then pksearchlist[ei][typ]['sfreq'][round(pk.sfreq,0)][ax][dsi]={} end
+                    table.insert(pksearchlist[ei][typ]['sfreq'][round(pk.sfreq,0)][ax][dsi],pi)
+                  end
+                end
+              end            
+            end
+          end
+        end
+      end
+    end
+  end
+  -- built averege to average comparion
+  for ei,e in ipairs(machine.elements) do 
+    if e.data~=nil and e.data.spec~=nil and e.data.spec.cpl~=nil then
+      local sr1=e.speedratio
+      for typ,axes in pairs(e.data.spec.cpl) do
+        if typ=='average' then 
+          local pks1=axes.ave
+          local tn,tg,tl,tf={},{},{},{}
+          for ei1,e1 in ipairs(machine.elements) do 
+            local sr2=e1.speedratio
+            if e1.data~=nil and e1.data.spec~=nil and e1.data.spec.cpl~=nil then
+              for typ1,pks2 in pairs(e1.data.spec.cpl) do
+                if typ1=='average' and e~=e1 then
+                  local gr,ls,n,f,tg,tl=0,0,0,0,0,0
+                  for fr2,pk2 in pairs(pks2.ave) do
+                    if fr2~='avetoave' then
+                      n=n+1
+                      if pks1[fr2]~=nil and roundnearest(pk2.sord,pk2.rnd)==roundnearest(pks1[fr2].sord,pks1[fr2].rnd) then
+                        f=f+1
+                        if pk2.sval>pks1[fr2].sval*2  then 
+                          gr=gr+1 
+                          tg=tg+pk2.sval/(pks1[fr2].sval*2)
+                        end
+                        if  pk2.sval<pks1[fr2].sval/2 then 
+                          ls=ls+1
+                          tl=tl+pk2.sval/(pks1[fr2].sval/2)
+                        end
+                      end
+                    end
+                  end
+                  local dbg=0
+                  if tg>0 then dbg=round(20*math.log(tg,10),1) end
+                  local dbl=0
+                  if tl>0  then dbl=round(20*math.log(tl,10),1) end
+                  if machine.elements[ei].data.spec.cpl[typ]['avetoave']==nil then machine.elements[ei].data.spec.cpl[typ]['avetoave']={} end
+                  machine.elements[ei].data.spec.cpl[typ]['avetoave'][ei1]={total=n,matches=f,greater=gr,less=ls,dbgreater=dbg,dbless=dbl}
+                  local _
+                end
+              end
+            end
+          end
+          local ele={}
+          if machine.elements[ei].data.spec.cpl['average']['avetoave']~=nil then
+            ele=machine.elements[ei].data.spec.cpl['average']['avetoave'] 
+            local sameas={}
+            for ei1,e1 in ipairs(machine.elements) do 
+              if ele[ei1]~=nil and ele[ei1].total==ele[ei1].matches and ele[ei1].greater==0 and ele[ei1].less==0 then
+                --sameas[ei1]=true
+                table.insert(sameas,ei1)
+
+              end
+            end
+            ele.sameas=sameas
+          end
+        end
+      end
+    end
+  end
 
 -----------------------------------------------------------------
   local dq_warnings=data_quality()
+  local machcomp=#machine.components
+  local ft = {}
+  for fg,fd in pairs(machine.quality_faults) do
+    ft[fg] = fd
+  end
+  g_faults={}
+  for x=1,machcomp,1 do
+    g_faults[x]={}
+  end
+  g_faults[machcomp]=ft
+  g_faults_or_recs=g_faults
 -----------------------------------------------------------------
   debugprint('Normalizing Data', os.clock()-stime)
-  local sr1xs=norm( sdgs ) -- normalize the data
+  local sr1xs=norm( sdgs,pksearchlist ) -- normalize the data
 ------------------------------------------------------------------   
 -- REVIEW: What is sr1xs?  Driver speed I think.  This changed the behavior of the normalize function
 --         which will break if other implementations, such as normalize0 are used.
-  debugprint('Normalize Quality Data', os.clock()-stime)
-  dq_warnings=normalization_quality(dq_warnings,sr1xs)
+  --debugprint('Normalize Quality Data', os.clock()-stime)
+  -- dq_warnings=normalization_quality(dq_warnings,sr1xs)
 
 ------------------------------------------------------------------
 
@@ -1063,7 +1262,7 @@ function initialize_data( norm )
   end
 
   local ratios,speeds,nspeeds={},{},{}
-
+  pksearchlist={}
 -- complete composite peak list with normalized info      
   for ei,e in ipairs(machine.elements) do 
     if e.data~=nil and e.data.spec~=nil and e.data.spec.cpl~=nil then
@@ -1082,9 +1281,9 @@ function initialize_data( norm )
       -- build a list of shaft ratios
       for ci,csr in pairs (g_comp_speed_ratio) do
         ratios[csr]=true
-      end    
+      end  
+      speeds[ei]={}
       for rat,_ in pairs(ratios) do
-        speeds[ei]={}
         table.insert(speeds[ei],rat/g_comp_speed_ratio[comp_index])
       end
       nspeeds[ei]=#speeds[ei]  
@@ -1118,125 +1317,121 @@ function initialize_data( norm )
       pksearchlist[ei]={}
 
       for typ,axes in pairs(e.data.spec.cpl) do
-        pksearchlist[ei][typ]={}
-        pksearchlist[ei][typ]['sfreq']={}
-        pksearchlist[ei][typ]['ord']={}
-        pksearchlist[ei][typ]['bin']={}
-        for ax, pl in pairs(axes) do
-          if string.len(ax)>1 then
-            axes[ax]=nil -- remove normalizing non-composite peaklist
-          else
-            if pl.shaftspeed==nil and #pl.peaks==0 and e.data.spec.normal[ax][1]~=nil then
-              pl['shaftspeed']={}
-              pl['shaftspeed']['ave']=machine.datasets[e.data.spec.normal[ax][1]].speed
-            elseif pl.shaftspeed==nil and #pl.peaks==0 and e.data.spec.normal[ax][1]==nil then
-              pl['shaftspeed']={}
-              pl['shaftspeed']['ave']=machine.speed
-            elseif #pl.peaks~=0 then
-              for pi,pk in ipairs(pl.peaks) do
-                if typ=="normal" or typ=="demod" then  
-                  pk.sord=pk.sfreq/machine.datasets[pk.sdsi].speed
-                  pk.order=round(pk.sord,2)
-                  -- build frequency indexed search list 
-                  local ord='sord'
-                  local bin='sbin'
-                  if typ=="average" then 
-                    ord='aord' 
-                    bin='abin'
-                  end-- build frequency indexed search list 
-                  if pksearchlist[ei][typ]['ord'][round(pk[ord],1)]==nil then pksearchlist[ei][typ]['ord'][round(pk[ord],1)]={} end
-                  if pksearchlist[ei][typ]['sfreq'][round(pk.sfreq,0)]==nil then pksearchlist[ei][typ]['sfreq'][round(pk.sfreq,0)]={} end
-                  if pksearchlist[ei][typ]['bin'][round(pk[bin],0)]==nil then pksearchlist[ei][typ]['bin'][round(pk[bin],0)]={} end
-                  if pksearchlist[ei][typ]['ord'][round(pk[ord],1)][ax]==nil then pksearchlist[ei][typ]['ord'][round(pk[ord],1)][ax]={} end
-                  if pksearchlist[ei][typ]['sfreq'][round(pk.sfreq,0)][ax]==nil then pksearchlist[ei][typ]['sfreq'][round(pk.sfreq,0)][ax]={} end
-                  if pksearchlist[ei][typ]['bin'][round(pk[bin],0)][ax]==nil then pksearchlist[ei][typ]['bin'][round(pk[bin],0)][ax]={} end
-                  table.insert(pksearchlist[ei][typ]['ord'][round(pk[ord],1)][ax],pi)
-                  table.insert(pksearchlist[ei][typ]['sfreq'][round(pk.sfreq,0)][ax],pi)
-                  table.insert(pksearchlist[ei][typ]['bin'][round(pk[bin],0)][ax],pi)
-                  if nspeeds[ei]>1 then
-                    local t={}
-                    for _,sp in ipairs(speeds[ei]) do
-                      t[tostring(round(sp,3))]=pk.sord/sp
+        if typ~='average' then 
+          pksearchlist[ei][typ]={}
+          pksearchlist[ei][typ]['sfreq']={}
+          pksearchlist[ei][typ]['ord']={}
+          for ax, pl in pairs(axes) do
+            if string.len(ax)>1 then
+              axes[ax]=nil -- remove normalizing non-composite peaklist
+            else
+              if pl.shaftspeed==nil and #pl.peaks==0 and e.data.spec.normal[ax][1]~=nil then
+                pl['shaftspeed']={}
+                pl['shaftspeed']['ave']=machine.datasets[e.data.spec.normal[ax][1]].speed
+              elseif pl.shaftspeed==nil and #pl.peaks==0 and e.data.spec.normal[ax][1]==nil then
+                pl['shaftspeed']={}
+                pl['shaftspeed']['ave']=machine.speed
+              elseif #pl.peaks~=0 then
+                for pi,pk in ipairs(pl.peaks) do
+                  if typ=="normal" or typ=="demod" then  
+                    pk.sord=pk.sfreq/machine.datasets[pk.sdsi].speed
+                    pk.order=round(pk.sord,2)
+                    -- build frequency indexed search list 
+                    local ord='sord'
+                    if typ=="average" then 
+                      ord='aord' 
+                    end-- build frequency indexed search list 
+                    if pksearchlist[ei][typ]['ord'][round(pk[ord],1)]==nil then pksearchlist[ei][typ]['ord'][round(pk[ord],1)]={} end
+                    if pksearchlist[ei][typ]['sfreq'][round(pk.sfreq,0)]==nil then pksearchlist[ei][typ]['sfreq'][round(pk.sfreq,0)]={} end
+                    if pksearchlist[ei][typ]['ord'][round(pk[ord],1)][ax]==nil then pksearchlist[ei][typ]['ord'][round(pk[ord],1)][ax]={} end
+                    if pksearchlist[ei][typ]['sfreq'][round(pk.sfreq,0)][ax]==nil then pksearchlist[ei][typ]['sfreq'][round(pk.sfreq,0)][ax]={} end
+                    table.insert(pksearchlist[ei][typ]['ord'][round(pk[ord],1)][ax],pi)
+                    table.insert(pksearchlist[ei][typ]['sfreq'][round(pk.sfreq,0)][ax],pi)
+                    if nspeeds[ei]>1 then
+                      local t={}
+                      for _,sp in ipairs(speeds[ei]) do
+                        t[tostring(round(sp,3))]=pk.sord/sp
+                      end
+                      pk.orders=t
                     end
-                    pk.orders=t
-                  end
 
-                  -- add average amplitude info to  normal peaks
-                  local aves={}
-                  if e.data.spec['average'] ~= nil then
-                    aves=e.data.spec['average'][ax]
-                  end
-                  local s=pk.sval
-                  local a
-                  local haveave=false
-                  local avebin,abin,pkamp,afmax,avedsi,aord, afreq,sev=0,0,0,0,0,0,0,0
-                  if typ=='normal' and aves~=nil and #aves>0 then
-                    table.sort( aves, bw_sort )
-                    for m,ad in ipairs( aves ) do
-                      if haveave then break end
-                      local ads = machine.datasets[ad]
-                      avebin=((pk.sord)/ads.bw+1)
-                      if avebin>1 and avebin < #ads.data - g_bin_margin - 2 then
-                        local ads_speed=ads.speed
-                        afmax=ads.fmax
-                        a=ds_spline_value( ads, avebin )
-                        aord=(avebin-1)*ads.bw
-                        afreq=aord*ads.speed
-                        avedsi=ad 
-                        local bin_margin=g_bin_margin/ads.bw/100
-                        for bin=avebin-bin_margin,avebin+bin_margin, .1 do  
-                          haveave=true
-                          if bin>1 and bin<=#ads.data-1  then
-                            local aveamp=ds_spline_value( ads, bin )  -- spline amplitude
-                            if aveamp > pkamp  then 
-                              pkamp=aveamp
-                              avebin=bin
+                    -- add average amplitude info to  normal peaks
+                    local aves={}
+                    if e.data.spec['average'] ~= nil then
+                      aves=e.data.spec['average'][ax]
+                    end
+                    local s=pk.sval
+                    local a
+                    local haveave=false
+                    local avebin,abin,pkamp,afmax,avedsi,aord, afreq,sev=0,0,0,0,0,0,0,0
+                    if typ=='normal' and aves~=nil and #aves>0 then
+                      table.sort( aves, bw_sort )
+                      for m,ad in ipairs( aves ) do
+                        if haveave then break end
+                        local ads = machine.datasets[ad]
+                        avebin=((pk.sord)/ads.bw+1)
+                        if avebin>1 and avebin < #ads.data - g_bin_margin - 2 then
+                          local ads_speed=ads.speed
+                          afmax=ads.fmax
+                          a=ds_spline_value( ads, avebin )
+                          aord=(avebin-1)*ads.bw
+                          afreq=aord*ads.speed
+                          avedsi=ad 
+                          local bin_margin=g_bin_margin/ads.bw/100
+                          for bin=avebin-bin_margin,avebin+bin_margin, .1 do  
+                            haveave=true
+                            if bin>1 and bin<=#ads.data-1  then
+                              local aveamp=ds_spline_value( ads, bin )  -- spline amplitude
+                              if aveamp > pkamp  then 
+                                pkamp=aveamp
+                                avebin=bin
+                              end
                             end
                           end
+                          a=pkamp ---ConvertSpectrum( g_internal_unit  , Unit.U_VDB , pkamp )
                         end
-                        a=pkamp ---ConvertSpectrum( g_internal_unit  , Unit.U_VDB , pkamp )
-                      end
 
-                      if haveave then
-                        local sdb=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , s )
-                        local adb=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , a )
-                        if sdb>50 and sdb>adb then 
-                          -- severity doubles or halves every +/-12 dB from 110 VdB 
-                          -- 110 VdB threshold is GSO spec which is really close to mil-std-167 and .1 in/sec industrial rule of thumb for rough vibration
-                          sev=(sdb-adb)*(10^(sdb/40)/10^(110/40)) 
+                        if haveave then
+                          local sdb=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , s )
+                          local adb=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , a )
+                          if sdb>50 and sdb>adb then 
+                            -- severity doubles or halves every +/-12 dB from 110 VdB 
+                            -- 110 VdB threshold is GSO spec which is really close to mil-std-167 and .1 in/sec industrial rule of thumb for rough vibration
+                            sev=(sdb-adb)*(10^(sdb/40)/10^(110/40)) 
+                          end
+                          pk.adsi=avedsi
+                          pk.aval=a
+                          pk.pct=((s-a)/a)
+                          pk.dif=s-a
+                          pk.aord=(avebin-1)*ads.bw
+                          pk.afreq=pk.aord*ads.speed
+                          pk.sev=sev
                         end
-                        pk.adsi=avedsi
-                        pk.aval=a
-                        pk.pct=((s-a)/a)
-                        pk.dif=s-a
-                        pk.aord=(avebin-1)*ads.bw
-                        pk.afreq=pk.aord*ads.speed
-                        pk.sev=sev
+                      end
+                    elseif typ=='normal' and (aves==nil or #aves==0) then
+                      local sdb=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , s )
+                      local adb=constantaccelspec(g_no_ave_non_ff_spec,pk.sord)
+                      a=ConvertSpectrum(Unit.U_VDB , g_internal_unit  ,  adb )
+                      if sdb>50 and sdb>adb then 
+                        -- severity doubles or halves every +/-12 dB from 110 VdB 
+                        -- 110 VdB threshold is GSO spec which is really close to mil-std-167 and .1 in/sec industrial rule of thumb for rough vibration
+                        sev=(sdb-adb)*(10^(sdb/40)/10^(110/40)) 
+                      end
+                      pk.adsi=0
+                      pk.aval=a
+                      pk.pct=((s-a)/a)
+                      pk.dif=s-a
+                      pk.aord=pk.sord
+                      pk.afreq=pk.sfreq
+                      pk.sev=sev
+                    elseif typ~='normal' then
+                      if pk.sbin>8 then
+                        pk.sev=20*math.log(pk.mpct,10)
+                        pk.dif=pk.sev
                       end
                     end
-                  elseif typ=='normal' and (aves==nil or #aves==0) then
-                    local sdb=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , s )
-                    local adb=constantaccelspec(g_no_ave_non_ff_spec,pk.sord)
-                    a=ConvertSpectrum(Unit.U_VDB , g_internal_unit  ,  adb )
-                    if sdb>50 and sdb>adb then 
-                      -- severity doubles or halves every +/-12 dB from 110 VdB 
-                      -- 110 VdB threshold is GSO spec which is really close to mil-std-167 and .1 in/sec industrial rule of thumb for rough vibration
-                      sev=(sdb-adb)*(10^(sdb/40)/10^(110/40)) 
-                    end
-                    pk.adsi=0
-                    pk.aval=a
-                    pk.pct=((s-a)/a)
-                    pk.dif=s-a
-                    pk.aord=pk.sord
-                    pk.afreq=pk.sfreq
-                    pk.sev=sev
-                  elseif typ~='normal' then
-                    if pk.sbin>8 then
-                      pk.sev=20*math.log(pk.mpct,10)
-                      pk.dif=pk.sev
-                    end
-                  end
-                end -- pk
+                  end -- pk
+                end
               end
             end
           end
@@ -1244,47 +1439,189 @@ function initialize_data( norm )
       end
     end
   end
+
+  debugprint('Normalize Quality Data', os.clock()-stime)
+  dq_warnings=normalization_quality(dq_warnings,sr1xs,pksearchlist)
+
+-- find the order of sub 1x sidesand (i.e. train rate) by look for repeated peak spacing
+  local dif={}
+  for ei,e in ipairs(machine.elements) do 
+    if e.data~=nil and e.data.spec~=nil and e.data.spec.cpl~=nil then
+      for typ,axes in pairs(e.data.spec.cpl) do
+        if typ~='average' then
+          for ax, pl in pairs(axes) do
+            local sub1x_tone_spacing={}
+            if #pl.peaks>0 then
+              local buckets={}
+              local bsev={}
+              -- build a table of (1/1000 order)*1000 order bucket 
+              for x=1,1100,1 do
+                buckets[x]=0
+                bsev[x]=0
+              end
+              for p1,pk1 in ipairs(pl.peaks) do
+                for p2,pk2 in ipairs(pl.peaks) do
+                  if p2>p1 then
+                    local delta=round(round (pk2.sord-pk1.sord,3)*1000)
+                    if delta<=1100 then -- is the delta less than 1.1 orders
+                      if buckets[delta]~=nil then 
+                        buckets[delta]=buckets[delta]+1
+                        if  pk1.sev~=nil then  
+                          bsev[delta]=bsev[delta]+pk1.sev
+                        end
+                      end
+                    else
+                      break -- next pk1 if delta is greater than 1.1
+                    end
+                  end
+                end
+              end
+              local ave={}
+              local save={}
+              local sum=0
+              local maxpk=0
+              -- create a pseudo-spline by averaging each bucket with its neihboring buckets
+              for b,v in ipairs(buckets) do
+                sum=sum+v
+                if b>1 and b<#buckets-1 then
+                  ave[b]=(buckets[b-1]+buckets[b]+buckets[b+1])/3 -- average count
+                  save[b]=(bsev[b-1]+bsev[b]+bsev[b+1])/3  -- average severity
+                  maxpk=math.max(maxpk,ave[b])
+                else
+                  ave[b]=0
+                  save[b]=0
+                end
+              end
+              local aveb=sum/#buckets
+              local peaks={}
+              local lastmax=0
+              local down=false
+              local bb={}
+              local cutoff= round(math.max(5,maxpk/1.5))
+              for b,v in ipairs(ave) do
+                bb[b]=math.max(0,v-cutoff) -- remove the non significant repeats < 5 or more
+                v=bb[b]
+                if v>lastmax then lastmax=v end
+                -- find the center of the repeat piles
+                if lastmax>0 and v<lastmax and not(down) then
+                  table.insert(peaks,{b=b-1,v=lastmax, s=save[b-1]})
+                  down=true
+                elseif down and v==0 then
+                  lastmax=0 
+                  down=false
+                end
+              end
+              local fp={}
+              local sp={}
+              local ismult,m,r
+              -- remove higher order harmonics of the peak spacing and add their count and severity to the fundamental.
+              for i1,v1 in pairs( peaks) do
+                for i2,v2 in pairs( peaks) do
+                  if i2>i1 and fp[v1.b]~=0  then
+                    ismult,m,r=is_a_multiple(v1.b,v2.b,.003)
+                    if ismult then
+                      if fp[v1.b]==nil then fp[v1.b]=round(v1.v) end
+                      if sp[v1.b]==nil then sp[v1.b]=round(v1.s) end
+                      fp[v1.b]=round(fp[v1.b]+v2.v)
+                      fp[v2.b]=0
+                      sp[v1.b]=round(sp[v1.b]+v2.s)
+                      sp[v2.b]=0
+                    end
+                  end
+                end
+                if fp[v1.b]==nil then fp[v1.b]=round(v1.v) end
+                if fp[v1.b]==0 then fp[v1.b]=nil end
+                if sp[v1.b]==nil then sp[v1.b]=round(v1.s) end
+                if sp[v1.b]==0 then sp[v1.b]=nil end
+              end
+              local df={}
+              local isshaftspeed=false
+              for f,v in pairs (fp) do
+                for _,spd in ipairs(speeds[ei]) do
+                  local isshaftmult,m,r=is_a_multiple(spd,f/1000,.005)
+                  if isshaftmult then isshaftspeed=true end
+
+                end
+                if not isshaftspeed then
+                  if sp[f]==nil  then
+                    df[f/1000]={hits=v}
+                  else
+                    df[f/1000]={hits=v,sev=sp[f]}
+                  end
+                end
+              end
+              sub1x_tone_spacing=df
+            end
+            pl.sub1x_spacing=sub1x_tone_spacing
+          end
+        end
+      end
+    end
+  end
+
   for ei,e in ipairs(machine.elements) do 
     if e.data~=nil and e.data.spec~=nil and e.data.spec.cpl~=nil then
       -- build a lists of shaft rate harmonic series     
       for typ,axes in pairs(e.data.spec.cpl) do
-        for ax, pl in pairs(axes) do
-          local haveharm=false
-          local shaftrateharmonics,harms={},{}
-          for pi,sp in ipairs(speeds[ei]) do
-            local close=.0025
-            if typ=='demod' then close=.005 end
-            local maxord=maxscale(ei,typ,ax)
-            for x=1,math.floor(maxord/sp),1 do
-              local pis,pi,pk,r=peaksearch(pksearchlist,ei,typ,ax,x*sp,'ord',close)
-              if pis~=nil then
-                  local bw
-                  if typ=='average' then
-                    bw=machine.datasets[pk.sdsi].bw
-                  else
-                    bw=machine.datasets[pk.sdsi].bw/machine.datasets[pk.sdsi].speed
-                  end
-                  if pk.sord/sp>20 then close=close/2.5 end
-                  local isharm,m,r=is_a_multiple(sp,pk.sord,close)
-                  if isharm and sp/bw>3 and m<100 then
-                    pk.flags=add_flag(pk.flags,tostring(round(sp,3))..'x')--..'-'..tostring(round(pk.sord/sp,3)))
-                    if pk.subharmonics==nil then
-                      pk['subharmonics']={order=round(sp,3),harm=m}
-                    else
-                      table.insert(pk.subharmonics,{order=tostring(round(sp,3)),harm=m})
+        if typ~='average' then
+          for ax, pl in pairs(axes) do
+            local haveharm=false
+            local shaftrateharmonics,harms={},{}
+            if #pl.peaks>0 then
+              local minbw
+              if typ=='average' then
+                minbw=machine.datasets[pl.peaks[1].sdsi].bw
+              else
+                minbw=machine.datasets[pl.peaks[1].sdsi].bw/machine.datasets[pl.peaks[1].sdsi].speed
+              end
+              local spds={}
+              for pi,sp in ipairs(speeds[ei]) do
+                table.insert(spds,sp)
+              end
+              for sp,v in pairs(pl.sub1x_spacing) do
+                if v.sev~=nil and v.sev>0 and v.hits>2 then
+                  table.insert(spds,sp)
+                end
+              end
+              for pi,sp in ipairs(spds) do
+
+                if sp>minbw then
+                  local close=.003 --.0025
+                  if typ=='demod' then close=.005 end
+                  local maxord=maxscale(ei,typ,ax)
+                  for x=1,math.floor(maxord/sp),1 do
+                    local pis,pi,pk,r=peaksearch(pksearchlist,ei,typ,ax,x*sp,'ord',close)
+                    if pis~=nil then
+                      local bw
+                      if typ=='average' then
+                        bw=machine.datasets[pk.sdsi].bw
+                      else
+                        bw=machine.datasets[pk.sdsi].bw/machine.datasets[pk.sdsi].speed
+                      end
+                      if pk.sord/sp>20 then close=close/2.5 end
+                      local isharm,m,r=is_a_multiple(sp,pk.sord,close)
+                      if isharm and sp/bw>3 and m<100 then
+                        pk.flags=add_flag(pk.flags,tostring(round(sp,3))..'x')--..'-'..tostring(round(pk.sord/sp,3)))
+                        if pk.subharmonics==nil then
+                          pk['subharmonics']={order=round(sp,3),harm=m}
+                        else
+                          table.insert(pk.subharmonics,{order=tostring(round(sp,3)),harm=m})
+                        end
+                        table.insert(harms,pi)
+                      end
                     end
-                    table.insert(harms,pi)
                   end
+                end
+                if #harms>0 then
+                  haveharm=true
+                  shaftrateharmonics[tostring(round(sp,3))]=harms
+                end
+                harms={}
+              end
+              if haveharm then
+                pl['harmonics']=shaftrateharmonics
               end
             end
-            if #harms>0 then
-              haveharm=true
-              shaftrateharmonics[tostring(round(sp,3))]=harms
-            end
-            harms={}
-          end
-          if haveharm then
-            pl['harmonics']=shaftrateharmonics
           end
         end
       end
@@ -1306,20 +1643,21 @@ function initialize_data( norm )
 
 -- build a list of line frequency harmonics     
       for typ,axes in pairs(e.data.spec.cpl) do
-        for ax, pl in pairs(axes) do
-          local haveharm=false
-          local lfharmonics,harms={},{}
-          local close=.005
-          if pl.shaftspeed~=nil then
-            local lford=machine.linef/pl.shaftspeed.ave
-            local lastlf=0
-            local maxord=maxscale(ei,typ,ax)
-            for x=1,math.floor(maxord/lford),1 do
-              local pis,pi,pk,r=peaksearch(pksearchlist,ei,typ,ax,x*machine.linef,'sfreq',close)
-              if pis~=nil and #pis>0 then
+        if typ~='average' then
+          for ax, pl in pairs(axes) do
+            local haveharm=false
+            local lfharmonics,harms={},{}
+            local close=.005
+            if pl.shaftspeed~=nil then
+              local lford=machine.linef/pl.shaftspeed.ave
+              local lastlf=0
+              local maxord=maxscale(ei,typ,ax)
+              for x=1,math.floor(maxord/lford),1 do
+                local pis,pi,pk,r=peaksearch(pksearchlist,ei,typ,ax,x*machine.linef,'sfreq',close)
+                if pis~=nil and #pis>0 then
                   local bw
                   if typ=='average' then
-                   bw=machine.datasets[pk.sdsi].bw
+                    bw=machine.datasets[pk.sdsi].bw
                   else
                     bw=machine.datasets[pk.sdsi].bw/machine.datasets[pk.sdsi].speed
                   end
@@ -1335,22 +1673,23 @@ function initialize_data( norm )
                     end
                     table.insert(harms,pi)
                   end
+                end
               end
+              if #harms>0 then
+                haveharm=true
+                lfharmonics=harms
+              end
+              harms={}
             end
-            if #harms>0 then
-              haveharm=true
-              lfharmonics=harms
-            end
-            harms={}
-          end
-          if haveharm then
-            if pl.harmonics==nil then
-              pl['harmonics']={}
-            end
-            if pl.harmonics.LF==nil then
-              pl['harmonics']['LF']=lfharmonics
-            else
-              table.insert(pl['harmonics']['LF'],lfharmonics)
+            if haveharm then
+              if pl.harmonics==nil then
+                pl['harmonics']={}
+              end
+              if pl.harmonics.LF==nil then
+                pl['harmonics']['LF']=lfharmonics
+              else
+                table.insert(pl['harmonics']['LF'],lfharmonics)
+              end
             end
           end
         end
@@ -1358,62 +1697,76 @@ function initialize_data( norm )
 
       -- build a lists of shaft rate subharmonic series for each shaft 
       for typ,axes in pairs(e.data.spec.cpl) do
-        for ax, pl in pairs(axes) do
-          local havesubs=false
-          local subharmonics,harms={},{}
-          local subs
-          for _,sp in ipairs (speeds[ei]) do
-            if #speeds[ei]==1 then
-              subs={1/2,1/3,1/4,1/5,1/6}
-            elseif #speeds[ei]>1 and sp<1 and sp>.6 then
-              --subs={1/2,1/3,1/4,1/5,1/6}
-              subs={1/2}
-            elseif #speeds[ei]>1 and sp<=.6 then
-              subs={}
-            elseif #speeds[ei]>1 and sp>=1 then
-              --subs={1/2,1/3,1/4,1/5,1/6}
-              subs={1/2,1/3}
-            end
-            for _,sbh in ipairs(subs) do
-              local close=.001
-              local maxord=maxscale(ei,typ,ax)
-              for x=1,math.floor(maxord/sp),1 do
-                local pis,pi,pk,r=peaksearch(pksearchlist,ei,typ,ax,x*sp,'ord',close)
-                if pis~=nil then
-                    local bw
-                    if typ=='average' then
-                      bw=machine.datasets[pk.sdsi].bw
-                    else
-                      bw=machine.datasets[pk.sdsi].bw/machine.datasets[pk.sdsi].speed
-                    end
-                    local isspmult,sm=is_a_multiple(sp,pk.sord,close)
-                    local isshaftmult=false
-                    for _,spd in ipairs(speeds[ei]) do
-                      local isspd=is_a_multiple(spd,pk.sord,close)
-                      if isspd then isshaftmult = true end
-                    end
-                    local isharm,m,r=is_a_multiple(sp*sbh,pk.sord,close)
-                    if isharm and sp*sbh/bw>3 and sm<10 and not(isshaftmult) and not(isspmult) then
-                      pk.flags=add_flag(pk.flags,'u')
-                      if pk.subharmonics==nil then
-                        pk['subharmonics']={suborder=tonumber(tostring(round(sbh,2))),shaftspeedratio=round(sp,3),mult=m}
-                      else
-                        table.insert(pk.subharmonics,{suborder=tonumber(tostring(round(sbh,2))),shaftspeedratio=round(sp,3),mult=m})
-                      end
-                      table.insert(harms,pi)
-                    end
-                  if #harms>0 then
-                    havesubs=true
-                    if subharmonics[tostring(round(sp,3))]==nil then subharmonics[tostring(round(sp,3))]={} end
-                    subharmonics[tostring(round(sp,3))][tostring(round(sbh,2))]=harms
-                    harms={}
+        if typ~='average' then
+          for ax, pl in pairs(axes) do
+            local subharmonics,harms={},{}
+            local havesubs=false
+            if #pl.peaks>0 then
+              local minbw
+              if typ=='average' then
+                minbw=machine.datasets[pl.peaks[1].sdsi].bw
+              else
+                minbw=machine.datasets[pl.peaks[1].sdsi].bw/machine.datasets[pl.peaks[1].sdsi].speed
+              end
+
+
+              local subs
+              for _,sp in ipairs (speeds[ei]) do
+                if sp>minbw then
+                  if #speeds[ei]==1 then
+                    subs={1/2,1/3,1/4,1/5,1/6}
+                  elseif #speeds[ei]>1 and sp<1 and sp>.6 then
+                    --subs={1/2,1/3,1/4,1/5,1/6}
+                    subs={1/2}
+                  elseif #speeds[ei]>1 and sp<=.6 then
+                    subs={}
+                  elseif #speeds[ei]>1 and sp>=1 then
+                    --subs={1/2,1/3,1/4,1/5,1/6}
+                    subs={1/2,1/3}
                   end
-                end 
+                  for _,sbh in ipairs(subs) do
+                    local close=.001
+                    local maxord=maxscale(ei,typ,ax)
+                    for x=1,math.floor(maxord/sp),1 do
+                      local pis,pi,pk,r=peaksearch(pksearchlist,ei,typ,ax,x*sp,'ord',close)
+                      if pis~=nil then
+                        local bw
+                        if typ=='average' then
+                          bw=machine.datasets[pk.sdsi].bw
+                        else
+                          bw=machine.datasets[pk.sdsi].bw/machine.datasets[pk.sdsi].speed
+                        end
+                        local isspmult,sm=is_a_multiple(sp,pk.sord,close)
+                        local isshaftmult=false
+                        for _,spd in ipairs(speeds[ei]) do
+                          local isspd=is_a_multiple(spd,pk.sord,close)
+                          if isspd then isshaftmult = true end
+                        end
+                        local isharm,m,r=is_a_multiple(sp*sbh,pk.sord,close)
+                        if isharm and sp*sbh/bw>3 and sm<10 and not(isshaftmult) and not(isspmult) then
+                          pk.flags=add_flag(pk.flags,'u')
+                          if pk.subharmonics==nil then
+                            pk['subharmonics']={suborder=tonumber(tostring(round(sbh,2))),shaftspeedratio=round(sp,3),mult=m}
+                          else
+                            table.insert(pk.subharmonics,{suborder=tonumber(tostring(round(sbh,2))),shaftspeedratio=round(sp,3),mult=m})
+                          end
+                          table.insert(harms,pi)
+                        end
+                        if #harms>0 then
+                          havesubs=true
+                          if subharmonics[tostring(round(sp,3))]==nil then subharmonics[tostring(round(sp,3))]={} end
+                          subharmonics[tostring(round(sp,3))][tostring(round(sbh,2))]=harms
+                          harms={}
+                        end
+                      end 
+                    end
+                  end
+                end
               end
             end
-          end
-          if havesubs then
-            pl['subharmonics']=subharmonics
+            if havesubs then
+              pl['subharmonics']=subharmonics
+            end
           end
         end
       end 
@@ -1435,42 +1788,45 @@ function initialize_data( norm )
       end
       -- go through the normal peak list for each axis and add info (demod hits, harmonic series, SR sideband series, etc.)
       for typ,axes in pairs(e.data.spec.cpl) do
-        for ax, pl in pairs(axes) do
-          local lastdmindex=nil
-          local t2=os.clock()
-          for pi,pk in ipairs(pl.peaks) do
-            local t1=os.clock()
-            local pkbwo
-            if typ=='average' then
-              pkbwo=machine.datasets[pk.sdsi].bw
-            else
-              pkbwo=machine.datasets[pk.sdsi].bw/machine.datasets[pk.sdsi].speed
-            end
-            -- add demode peak match flag to peak 
-            -- local t2 =os.clock()
-            if typ=="normal" and 20*math.log(pk.mpct,10)>3 then
-              local closer=false
-              --for daxes,dmpl in pairs(e.data.spec.cpl.demod) do
-              local dmpl={}
-              local da
-              if e.data.spec.cpl.demod[ax]==nil then
-                dmpl=e.data.spec.cpl.demod[dmaxis]
-                da=dmaxis
+        if typ~='average' then
+          for ax, pl in pairs(axes) do
+            local lastdmindex=0
+            local t2=os.clock()
+            if #pl.peaks>0 then
+              local minbw
+              if typ=='average' then
+                minbw=machine.datasets[pl.peaks[1].sdsi].bw
               else
-                dmpl=e.data.spec.cpl.demod[ax]
-                da=ax
+                minbw=machine.datasets[pl.peaks[1].sdsi].bw/machine.datasets[pl.peaks[1].sdsi].speed
               end
-              if dmpl~=nil and dmpl.peaks~=nil and  #dmpl.peaks>0 then
-                local dmbw=machine.datasets[dmpl.peaks[1].sdsi].bw
-                local maxord=maxscale(ei,typ,ax)
-                local pis=peaksearch(pksearchlist,ei,'demod',da,pk.sfreq,'sfreq')
-                if pis~=nil and #pis>0 then
-                  for np,dmpi in ipairs(pis) do
-                    local dmpk=dmpl.peaks[dmpi]
-                    if dmpk~=nil then
-                      if (dmpk.sfreq > pk.sfreq*(1.1*close+1)) or (np==#pis and dmpk.sfreq < pk.sfreq) then 
-                        goto nextpk 
-                      end
+              for pi,pk in ipairs(pl.peaks) do
+                local t1=os.clock()
+                local pkbwo
+                if typ=='average' then
+                  pkbwo=machine.datasets[pk.sdsi].bw
+                else
+                  pkbwo=machine.datasets[pk.sdsi].bw/machine.datasets[pk.sdsi].speed
+                end
+                -- add demode peak match flag to peak 
+                -- local t2 =os.clock()
+                if typ=="normal" and 20*math.log(pk.mpct,10)>3 then
+
+                  local closer=false
+                  --for daxes,dmpl in pairs(e.data.spec.cpl.demod) do
+                  local dmpl={}
+                  local da
+                  if e.data.spec.cpl.demod[ax]==nil then
+                    dmpl=e.data.spec.cpl.demod[dmaxis]
+                    da=dmaxis
+                  else
+                    dmpl=e.data.spec.cpl.demod[ax]
+                    da=ax
+                  end
+                  if dmpl~=nil and dmpl.peaks~=nil and  #dmpl.peaks>0 then
+                    local dmbw=machine.datasets[dmpl.peaks[1].sdsi].bw
+                    local maxord=maxscale(ei,typ,ax)
+                    local pis,dpi,dmpk,dr=peaksearch(pksearchlist,ei,'demod',da,pk.sfreq,'sfreq',close)
+                    if dmpk~=nil and dpi~=lastdmindex then
                       local matched=string.match(dmpk.flags,'a'..ax)=='a'..ax
                       if not (matched) then
                         local dmfreq=dmpk.sfreq
@@ -1478,381 +1834,519 @@ function initialize_data( norm )
                         if isclose and m1==1 and dmpk.dif~=nil and dmpk.dif>0 then -- is this demod peak freq nearly equal to current peak freq
                           if pi+1<=#pl.peaks then 
                             local alsoclose, m2, d2 =is_a_multiple(dmfreq,pl.peaks[pi+1].sfreq,close)
-                            if alsoclose and m2==1 and dmpk.dif>0 then  -- is the next peak closer to this demod peak freq
+                            if alsoclose and m2==1 and dmpk.dif>0 then  -- is the next peak closer to this demod peak 2/20/2020 DY
                               if d1<d2 then
                                 pk.flags=add_flag(pk.flags,'d')
-                                dmpk.flags=add_flag(dmpk.flags,'d')
-                                dmpk.flags=add_flag(dmpk.flags,'a'..ax)
+                                dmpl.peaks[dpi].flags=add_flag(dmpk.flags,'d')
+                                dmpl.peaks[dpi].flag=add_flag(dmpk.flags,'a'..ax)
+                                debugprint(dmpk.sfreq..'='..pk.sfreq,ax,ei,'also',d1..'<'..d2)
+                                lastdmindex=dpi
                                 goto nextpk
                               end
+                              ---debugprint(dmpk.sfreq..'='..pk.sfreq,ax,ei,'closer',d1..'>'..d2)
                             else
                               pk.flags=add_flag(pk.flags,'d')
                               dmpk.flags=add_flag(dmpk.flags,'d')
                               dmpk.flags=add_flag(dmpk.flags,'a'..ax)
+                              debugprint(dmpk.sfreq..'='..pk.sfreq,ax,ei,'notalso')
                               goto nextpk
                             end  
                           end 
                         end 
-                      else
-                        goto nextpk
-                      end  
-                    end 
+                      end
+                    end
                   end
                 end
-              end
-            end
 
-            ::nextpk::
+                ::nextpk::
 
-            -- add forcing frequency matches to peak
-            local isfffund=false
-            local matches={}
-            if machine.datasets[pk.sdsi].matches~=nil then
-              for _,mtch in ipairs (machine.datasets[pk.sdsi].matches) do
-                if round(mtch.bin)==round(pk.sbin) then
-                  table.insert (matches,mtch)
-                  pk.flags=add_flag(pk.flags,'m')
-                  if mtch.type=='F' then isfffund=true end
+                -- add forcing frequency matches to peak
+                local isfffund=false
+                local matches={}
+                if machine.datasets[pk.sdsi].matches~=nil then
+                  for _,mtch in ipairs (machine.datasets[pk.sdsi].matches) do
+                    if round(mtch.bin)==round(pk.sbin) then
+                      table.insert (matches,mtch)
+                      pk.flags=add_flag(pk.flags,'m')
+                      if mtch.type=='F' then isfffund=true end
+                    end
+                  end
+                  local aves={}
+                  if e.data.spec['average'] ~= nil then
+                    aves=e.data.spec['average'][ax]
+                  end
+                  if isfffund and (aves==nil or #aves==0) then
+                    local s=pk.sval
+                    local sdb=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , s )
+                    local adb=constantaccelspec(g_no_ave_ff_spec,pk.sord)
+                    local a=ConvertSpectrum(Unit.U_VDB , g_internal_unit  ,  adb )
+                    local sev=0
+                    if sdb>50 and sdb>adb then 
+                      -- severity doubles or halves every +/-12 dB from 110 VdB 
+                      -- 110 VdB threshold is GSO spec which is really close to mil-std-167 and .1 in/sec industrial rule of thumb for rough vibration
+                      sev=(sdb-adb)*(10^(sdb/40)/10^(110/40)) 
+                    end
+                    pk.adsi=0
+                    pk.aval=a
+                    pk.pct=((s-a)/a)
+                    pk.dif=s-a
+                    pk.aord=pk.sord
+                    pk.afreq=pk.sfreq
+                    pk.sev=sev
+                  end
                 end
-              end
-              local aves={}
-              if e.data.spec['average'] ~= nil then
-                aves=e.data.spec['average'][ax]
-              end
-              if isfffund and (aves==nil or #aves==0) then
-                local s=pk.sval
-                local sdb=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , s )
-                local adb=constantaccelspec(g_no_ave_ff_spec,pk.sord)
-                local a=ConvertSpectrum(Unit.U_VDB , g_internal_unit  ,  adb )
-                local sev=0
-                if sdb>50 and sdb>adb then 
-                  -- severity doubles or halves every +/-12 dB from 110 VdB 
-                  -- 110 VdB threshold is GSO spec which is really close to mil-std-167 and .1 in/sec industrial rule of thumb for rough vibration
-                  sev=(sdb-adb)*(10^(sdb/40)/10^(110/40)) 
-                end
-                pk.adsi=0
-                pk.aval=a
-                pk.pct=((s-a)/a)
-                pk.dif=s-a
-                pk.aord=pk.sord
-                pk.afreq=pk.sfreq
-                pk.sev=sev
-              end
-            end
-            if #matches>0 then pk.matches=matches end 
+                if #matches>0 then pk.matches=matches end 
 
-            -- add harmonics to tones
-            local close=.0025
-            if typ=='demod' then close=.005 end
-            local isshaftmult=false
-            local shaftmult=1
-            -- is this peak devidable by a shaft speed in this machine
-            for pi,spd in ipairs(speeds[ei]) do
-              if spd/pkbwo>=4 then -- only mark harmonics of shaft rate that can be properly resolved i.e. the speed is 4 times greater then bw DY 5/19/19
-                local isspd,shaftmult,r=is_a_multiple(spd,pk.sord,close)
-                if isspd then 
-                  isshaftmult = true 
-                  if pl.peaks[pi+1] ~=nil then
-                    local nisspd,nshaftmult,nr=is_a_multiple(spd,pl.peaks[pi+1].sord,close)
-                    if not (nisspd and shaftmult==nshaftmult and nr<r) then
-                      pk.flags=add_flag(pk.flags,round(spd,3)..'x')--..round(pk.sord/spd,3))
-                      if pk.subharmonics==nil and shaftmult~=1 then
-                        pk['subharmonics']={order=round(spd,3),harm=round(shaftmult,3)..'x'}
+                -- add harmonics to tones
+                local close=.003 --.0025
+                if typ=='demod' then close=.005 end
+                local isshaftmult=false
+                local shaftmult=1
+                -- is this peak devidable by a shaft speed in this machine
+                for pi,spd in ipairs(speeds[ei]) do
+                  if spd/pkbwo>=4 then -- only mark harmonics of shaft rate that can be properly resolved i.e. the speed is 4 times greater then bw DY 5/19/19
+                    local isspd,shaftmult,r=is_a_multiple(spd,pk.sord,close)
+                    if isspd then 
+                      isshaftmult = true 
+                      if pl.peaks[pi+1] ~=nil then
+                        local nisspd,nshaftmult,nr=is_a_multiple(spd,pl.peaks[pi+1].sord,close)
+                        if not (nisspd and shaftmult==nshaftmult and nr<r) then
+                          pk.flags=add_flag(pk.flags,round(spd,3)..'x')--..round(pk.sord/spd,3))
+                          if pk.subharmonics==nil and shaftmult~=1 then
+                            pk['subharmonics']={order=round(spd,3),harm=round(shaftmult,3)..'x'}
+                          elseif m~=1 then
+                            table.insert(pk.subharmonics,{order=round(spd,3)..'x',harm=round(shaftmult,3)})
+                          end
+                        end
+                      end
+                    end
+                  end
+                end  --for pi,spd
+                -- compare this tone every other tone in the peak list and look for harmonic and shaft rate side bands
+                local haveharm=false
+                local harms={}
+                local hsev,henrgy=0,0
+                -- is 
+                --for hpi,hpk in ipairs(pl.peaks) do
+                local maxord=math.min(maxscale(ei,typ,ax),21)
+                for x=1,math.floor(maxord),1 do
+                  local pis,hpi,hpk=peaksearch(pksearchlist,ei,typ,ax,x*pk.sord,'ord',close)
+                  if pis~=nil then
+                    local bw
+                    if typ=='average' then
+                      bw=machine.datasets[hpk.sdsi].bw
+                    else
+                      bw=machine.datasets[hpk.sdsi].bw/machine.datasets[hpk.sdsi].speed
+                    end
+                    if hpk.sord/pk.sord>20 then close=.0008 end
+                    local isharm,m,r=is_a_multiple(pk.sord,hpk.sord,close)
+                    if isharm and pk.sord/bw>3 and m<21 and hpk.mpct>.01 and pk.mpct>.01 then
+                      if hpk.sev~=nil and hpk.sev>0 then hsev=hsev+hpk.sev end
+                      henrgy=henrgy+hpk.sval 
+                      if hpk.subharmonics==nil and m~=1 then
+                        hpk['subharmonics']={order=round(pk.sord,3),harm=m}
                       elseif m~=1 then
-                        table.insert(pk.subharmonics,{order=round(spd,3)..'x',harm=round(shaftmult,3)})
+                        table.insert(hpk.subharmonics,{order=round(pk.sord,3),harm=m})
                       end
+                      if m>1 and #harms==0 then table.insert(harms,pi) end
+                      table.insert(harms,hpi)
                     end
                   end
                 end
-              end
-            end  --for pi,spd
-            -- compare this tone every other tone in the peak list and look for harmonic and shaft rate side bands
-            local haveharm=false
-            local harms={}
-            local hsev,henrgy=0,0
-            -- is 
-            --for hpi,hpk in ipairs(pl.peaks) do
-            local maxord=math.min(maxscale(ei,typ,ax),21)
-            for x=1,math.floor(maxord),1 do
-              local pis,hpi,hpk=peaksearch(pksearchlist,ei,typ,ax,x*pk.sord,'ord',close)
-              if pis~=nil then
-                  local bw
-                  if typ=='average' then
-                    bw=machine.datasets[hpk.sdsi].bw
-                  else
-                    bw=machine.datasets[hpk.sdsi].bw/machine.datasets[hpk.sdsi].speed
-                  end
-                  if hpk.sord/pk.sord>20 then close=.0008 end
-                  local isharm,m,r=is_a_multiple(pk.sord,hpk.sord,close)
-                  if isharm and pk.sord/bw>3 and m<21 and hpk.mpct>.01 and pk.mpct>.01 then
-                    if hpk.sev~=nil and hpk.sev>0 then hsev=hsev+hpk.sev end
-                    henrgy=henrgy+hpk.sval 
-                    if hpk.subharmonics==nil and m~=1 then
-                      hpk['subharmonics']={order=round(pk.sord,3),harm=m}
-                    elseif m~=1 then
-                      table.insert(hpk.subharmonics,{order=round(pk.sord,3),harm=m})
+                if #harms>1 and (not(isshaftmult) or isfffund) and (pk.subharmonics==nil or #pk.subharmonics==0 or (#pk.subharmonics>0 and isfffund )) then
+                  haveharm=true
+                  pk['harm_pk_index']=harms
+                  pk['harm_energy']=henrgy
+                  if hsev>0 then pk['harm_severity']=hsev end
+                end
+                -- add sidebands to tones
+                -- this section looks for LF sidebands on shaftrate tones > 20 orders and shaft rate sidebands on tones greater than 15 orders of shaftrate, +/- 20% sidebands each
+                maxord=maxscale(ei,typ,ax)
+                close=.0025
+                if #speeds[ei]==nspeeds[ei] then speeds[ei][nspeeds[ei]+1]=2*machine.linef/machine.datasets[pk.sdsi].speed end
+                for s,spd in ipairs(speeds[ei]) do
+                  if spd>minbw then
+                    local sbindex=round(spd,3)..'x'
+                    local sb=round(pk.sord*.2/spd)
+                    local lf=false
+                    if s>nspeeds[ei] then 
+                      close=.0004
+                      sbindex='2XLF'
+                      lf=true
+                      sb=round(pk.sfreq*.2/(2*machine.linef))
                     end
-                    if m>1 and #harms==0 then table.insert(harms,pi) end
-                    table.insert(harms,hpi)
-                  end
-              end
-            end
-            if #harms>1 and (not(isshaftmult) or isfffund) and (pk.subharmonics==nil or #pk.subharmonics==0 or (#pk.subharmonics>0 and isfffund )) then
-              haveharm=true
-              pk['harm_pk_index']=harms
-              pk['harm_energy']=henrgy
-              if hsev>0 then pk['harm_severity']=hsev end
-            end
-            -- add sidebands to tones
-            -- this section looks for LF sidebands on shaftrate tones > 20 orders and shaft rate sidebands on tones greater than 15 orders of shaftrate, +/- 20% sidebands each
-            maxord=maxscale(ei,typ,ax)
-            close=.0025
-            if #speeds[ei]==nspeeds[ei] then speeds[ei][nspeeds[ei]+1]=2*machine.linef/machine.datasets[pk.sdsi].speed end
-            for s,spd in ipairs(speeds[ei]) do
-              local sbindex=round(spd,3)..'x'
-              local sb=round(pk.sord*.2/spd)
-              local lf=false
-              if s>nspeeds[ei] then 
-                close=.001
-                sbindex='2XLF'
-                lf=true
-                sb=round(pk.sfreq*.2/(2*machine.linef))
-              end
-              if not(isshaftmult) and not(lf) and pk.sord<15 then sb=3 end
-              local haveside=false
-              local sides={},{}
-              local ssev,senrgy,sc=0,0,0
-              if ( pk.sord>15 and not (lf)) or (pk.sord>20 and lf) or typ=='demod' or not (isshaftmult) then
-                for sbd=-sb,sb,1 do
-                  local pis,spi,spk=peaksearch(pksearchlist,ei,typ,ax,pk.sord+(sbd*spd),'sord',close)
-                  if pis~=nil and spi~=nil then
-                      local bw     
-                      if typ=='average' then
-                        bw=machine.datasets[spk.sdsi].bw
-                      else
-                        bw=machine.datasets[spk.sdsi].bw/machine.datasets[spk.sdsi].speed
-                      end
-                      if (spk.sord>(pk.sord-(sb*spd))*1.10 and spk.sord<(pk.sord+(sb*spd))*1.10 and not(lf)) or (lf and math.abs( spk.sfreq-pk.sfreq)<pk.sfreq*.2) then
-                        local issame,m,r=is_a_multiple(pk.sord+(spd*sbd),spk.sord,close)
-                        if issame and spd/bw>1 and m==1  and spk.mpct>.01 and pk.mpct>.01 then
-                          if spk.sev~=nil and spk.sev>0 then 
-                            if pk.sb_severity[sbindex]==nil then pk.sb_severity[sbindex]=0 end
-                            pk.sb_severity[sbindex]=pk.sb_severity[sbindex]+spk.sev 
+                    if not(isshaftmult) and not(lf) and pk.sord<15 then sb=3 end
+                    local haveside=false
+                    local sides={},{}
+                    local ssev,senrgy,sc=0,0,0
+                    if ( pk.sord>15 and not (lf)) or (pk.sord>20 and lf) or typ=='demod' or not (isshaftmult) then
+                      for sbd=-sb,sb,1 do
+                        local pis,spi,spk=peaksearch(pksearchlist,ei,typ,ax,pk.sord+(sbd*spd),'sord',close)
+                        if pis~=nil and spi~=nil then
+                          local bw     
+                          if typ=='average' then
+                            bw=machine.datasets[spk.sdsi].bw
+                          else
+                            bw=machine.datasets[spk.sdsi].bw/machine.datasets[spk.sdsi].speed
                           end
-                          if pk.sb_energy[sbindex]==nil then pk.sb_energy[sbindex]=0 end                    
-                          pk.sb_energy[sbindex]=pk.sb_energy[sbindex]+spk.sval 
-                          if pk['sidebands']==nil then pk['sidebands']={} end
-                          if pk['sidebands'][sbindex]==nil then 
-                            pk['sidebands'][sbindex]={} 
-                            table.insert(pk['sidebands'][sbindex],pi)
+                          if (spk.sord>(pk.sord-(sb*spd))*1.10 and spk.sord<(pk.sord+(sb*spd))*1.10 and not(lf)) or (lf and math.abs( spk.sfreq-pk.sfreq)<pk.sfreq*.2) then
+                            local issame,m,r=is_a_multiple(pk.sord+(spd*sbd),spk.sord,close)
+                            if issame and spd/bw>1 and m==1  and spk.mpct>.01 and pk.mpct>.01 then
+                              if spk.sev~=nil and spk.sev>0 then 
+                                if pk.sb_severity[sbindex]==nil then pk.sb_severity[sbindex]=0 end
+                                pk.sb_severity[sbindex]=pk.sb_severity[sbindex]+spk.sev 
+                              end
+                              if pk.sb_energy[sbindex]==nil then pk.sb_energy[sbindex]=0 end                    
+                              pk.sb_energy[sbindex]=pk.sb_energy[sbindex]+spk.sval 
+                              if pk['sidebands']==nil then pk['sidebands']={} end
+                              if pk['sidebands'][sbindex]==nil then 
+                                pk['sidebands'][sbindex]={} 
+                                table.insert(pk['sidebands'][sbindex],pi)
+                              end
+                              if spi~=pi then 
+                                table.insert(pk['sidebands'][sbindex],spi) end
+                              end
+                              local _
+                            end
                           end
-                          if spi~=pi then 
-                            table.insert(pk['sidebands'][sbindex],spi) end
-                          end
-                          local _
                         end
                       end
+                      local _
+                      if pk.sidebands[sbindex]~=nil and #pk.sidebands[sbindex]<=1  then
+                        pk.sidebands[sbindex]={}
+                        pk['sb_energy'][sbindex]=0
+                        pk.sb_severity[sbindex]=0
+                      end
+                    end
                   end
-                end
+                  --debugprint(os.clock()-t1.." seconds to process "..round(pk.sfreq,3)..' Hz '..round(20*math.log(pk.mpct,10),1)..' dBm')
+                end -- peak
+
                 local _
-                if pk.sidebands[sbindex]~=nil and #pk.sidebands[sbindex]<=1  then
-                  pk.sidebands[sbindex]={}
-                  pk['sb_energy'][sbindex]=0
-                  pk.sb_severity[sbindex]=0
-                end
-              end
-              --debugprint(os.clock()-t1.." seconds to process "..round(pk.sfreq,3)..' Hz '..round(20*math.log(pk.mpct,10),1)..' dBm')
-            end -- peak
-            local _
-            for pi,pk in ipairs(pl.peaks) do
-              if (pk.harm_severity>g_peak_group_threshold ) then
-                for _,idx in ipairs(pk.harm_pk_index) do
-                  pl.peaks[idx].flags=add_flag(pl.peaks[idx].flags,'h')
-                end
-              end 
-              for sbf,sbpks in pairs(pk.sidebands) do
-                if (pk.sb_severity[sbf]~=nil and pk.sb_severity[sbf]>g_peak_group_threshold)  then
-                  for _,idx in ipairs(sbpks) do
-                    pl.peaks[idx].flags=add_flag(pl.peaks[idx].flags,'s')
-                  end
-                end
-              end -- sbpks
-            end -- pk
-            -- build sorted list of normal peak list items at the axis level
-            if typ=='normal' or true then
-              local num=20
-              local function sort_items(a,b) return a.item>b.item end
-              local sv={}
-              local df={}
-              local hs={}
-              local he={}
-              local sevr={}
-              local enrgr={}
-              local sbs={}
-              local sbfsev={}
-              local sbfenrg={}
-              local sbfs={}
-              local sbfe={}
-              if #pl.peaks>0 then
-                for j, pk in ipairs (pl.peaks) do
-                  if pk.sb_energy~=nil then
-                    for sbf,_ in pairs(pk.sb_energy) do
-                      sbfs[sbf]=sbf
-                    end
-                  end
-                end
-                for j, pk in ipairs (pl.peaks) do   -- peaks
-                  table.insert (sv , {index=j,item=pk.sval})
-                  if pk.harm_energy~=nil and pk.harm_energy>0 then 
-                    table.insert (he , {index=j,item=pk.harm_energy}) 
-                  end
-                  if pk.sev~= nil and pk.sev>0 then 
-                    if pk.harm_severity>0 then table.insert (hs , {index=j,item=pk.harm_severity}) end
-                    if pk.dif~=nil and pk.dif>0 then table.insert (df , {index=j,item=pk.dif})  end
-                    for sbf,sev in pairs(pk.sb_severity) do
-                      for _,sbn in pairs(sbfs) do
-                        if sbn==sbf and sev>0 then 
-                          local temp=sbfsev[sbn] or {}
-                          table.insert (temp,{index=j,item=sev})
-                          sbfsev[sbn]=temp
-                          temp={}
-                        end
-                      end
-                    end 
-                  end
-                  if pk.sb_energy~=nil then
-                    for sbf,sev in pairs(pk.sb_energy) do
-                      for _,sbn in pairs(sbfs) do
-                        if sbn==sbf then 
-                          local temp=sbfenrg[sbn] or {}
-                          table.insert (temp,{index=j,item=sev})
-                          sbfenrg[sbn]=temp
-                          temp={}
-                        end
-                      end
+                for pi,pk in ipairs(pl.peaks) do
+                  if (pk.harm_severity>g_peak_group_threshold ) then
+                    for _,idx in ipairs(pk.harm_pk_index) do
+                      pl.peaks[idx].flags=add_flag(pl.peaks[idx].flags,'h')
                     end
                   end 
-                end
-              end -- peaks
-              _,hs=sort_pk_items(hs)
-              _,he=sort_pk_items(he)
-              _,sv=sort_pk_items(sv)
-              _,df=sort_pk_items(df)
-              -- this section removes harmonics series from the sort harmonic energy and severity sorts the are harmonics of lower frequency series
-              local lists={he,hs}
-              for _,list in ipairs(lists) do
-                local unique={}
-                for i,ind in ipairs(list) do
-                  if i>1 then
-                    local found=false
-                    for _,tp in ipairs(unique) do
-                      for j,idx in ipairs (pl.peaks[tp].harm_pk_index) do
-                        if j>1 and ind==idx then
-                          found=true
-                          break
+                  for sbf,sbpks in pairs(pk.sidebands) do
+                    if (pk.sb_severity[sbf]~=nil and pk.sb_severity[sbf]>g_peak_group_threshold)  or true then
+                      for _,idx in ipairs(sbpks) do
+                        pl.peaks[idx].flags=add_flag(pl.peaks[idx].flags,'s')
+                      end
+                    end
+                  end -- sbpks
+
+                end -- pk
+                if #speeds[ei]==nspeeds[ei] and speeds[ei][nspeeds[ei]+1]~=nil then speeds[ei][nspeeds[ei]+1]=nil end  
+                -- build sorted list of normal peak list items at the axis level
+                if typ=='normal' or true then
+                  local num=20
+                  local function sort_items(a,b) return a.item>b.item end
+                  local sv={}
+                  local df={}
+                  local hs={}
+                  local he={}
+                  local sevr={}
+                  local enrgr={}
+                  local sbs={}
+                  local sbfsev={}
+                  local sbfenrg={}
+                  local sbfs={}
+                  local sbfe={}
+                  if #pl.peaks>0 then
+                    for j, pk in ipairs (pl.peaks) do
+                      if pk.sb_energy~=nil then
+                        for sbf,_ in pairs(pk.sb_energy) do
+                          sbfs[sbf]=sbf
                         end
                       end
-                      if found then break end
                     end
-                    if not(found) then table.insert(unique,ind) end
-                  else
-                    table.insert(unique,ind)
+                    for j, pk in ipairs (pl.peaks) do   -- peaks
+                      table.insert (sv , {index=j,item=pk.sval})
+                      if pk.harm_energy~=nil and pk.harm_energy>0 then 
+                        table.insert (he , {index=j,item=pk.harm_energy}) 
+                      end
+                      if pk.sev~= nil and pk.sev>0 then 
+                        if pk.harm_severity>0 then table.insert (hs , {index=j,item=pk.harm_severity}) end
+                        if pk.dif~=nil and pk.dif>0 then table.insert (df , {index=j,item=pk.dif})  end
+                        for sbf,sev in pairs(pk.sb_severity) do
+                          for _,sbn in pairs(sbfs) do
+                            if sbn==sbf and sev>0 then 
+                              local temp=sbfsev[sbn] or {}
+                              table.insert (temp,{index=j,item=sev})
+                              sbfsev[sbn]=temp
+                              temp={}
+                            end
+                          end
+                        end 
+                      end
+                      if pk.sb_energy~=nil then
+                        for sbf,sev in pairs(pk.sb_energy) do
+                          for _,sbn in pairs(sbfs) do
+                            if sbn==sbf then 
+                              local temp=sbfenrg[sbn] or {}
+                              table.insert (temp,{index=j,item=sev})
+                              sbfenrg[sbn]=temp
+                              temp={}
+                            end
+                          end
+                        end
+                      end 
+                    end
+                  end -- peaks
+                  _,hs=sort_pk_items(hs)
+                  _,he=sort_pk_items(he)
+                  _,sv=sort_pk_items(sv)
+                  _,df=sort_pk_items(df)
+                  -- this section removes harmonics series from the sort harmonic energy and severity sorts the are harmonics of lower frequency series
+                  local lists={he,hs}
+                  for _,list in ipairs(lists) do
+                    local unique={}
+                    for i,ind in ipairs(list) do
+                      if i>1 then
+                        local found=false
+                        for _,tp in ipairs(unique) do
+                          for j,idx in ipairs (pl.peaks[tp].harm_pk_index) do
+                            if j>1 and ind==idx then
+                              found=true
+                              break
+                            end
+                          end
+                          if found then break end
+                        end
+                        if not(found) then table.insert(unique,ind) end
+                      else
+                        table.insert(unique,ind)
+                      end
+                    end
+                    list=unique
                   end
-                end
-                list=unique
-              end
 
-              for sbf,sev in pairs(sbfsev) do  -- sb severity sideband frequency
-                sevr,sev=sort_pk_items(sev, true)
-                --
-                -- the next section removes indicies that are included in a higher severity groups
-                --
-                local nodups={}
-                local sl={} 
-                local highersbsg={}
-                if #sev>0 then    -- #sev>0        
-                  local sgi=sev[1]
-                  table.insert(nodups,sgi) 
-                  if #sev>1 then  -- #sev>1 
-                    table.move(sev,2,#sev,1,sl)
-                    for x,sbgit in pairs (sl) do   -- sorted severity list
-                      highersbsg={}
-                      table.move(sev,1,x,1,highersbsg)
-                      local dup=false
-                      local sgit =sbgit
-                      for sbgin,sbgi in ipairs (highersbsg) do -- higher sb groups
-                        if dup then break end
-                        local sgi=sbgi
-                        for sbgf,sbidx in pairs (pl.peaks[tonumber(sgi)].sidebands) do  -- sidebands freq groups of index from higher group index
+                  for sbf,sev in pairs(sbfsev) do  -- sb severity sideband frequency
+                    sevr,sev=sort_pk_items(sev, true)
+                    --
+                    -- the next section removes indicies that are included in a higher severity groups
+                    --
+                    local nodups={}
+                    local sl={} 
+                    local highersbsg={}
+                    if #sev>0 then    -- #sev>0        
+                      local sgi=sev[1]
+                      table.insert(nodups,sgi) 
+                      if #sev>1 then  -- #sev>1 
+                        table.move(sev,2,#sev,1,sl)
+                        for x,sbgit in pairs (sl) do   -- sorted severity list
+                          highersbsg={}
+                          table.move(sev,1,x,1,highersbsg)
+                          local dup=false
+                          local sgit =sbgit
+                          for sbgin,sbgi in ipairs (highersbsg) do -- higher sb groups
+                            if dup then break end
+                            local sgi=sbgi
+                            for sbgf,sbidx in pairs (pl.peaks[tonumber(sgi)].sidebands) do  -- sidebands freq groups of index from higher group index
 
-                          if sbgf==sbf then -- sb freq match
-                            local idx
-                            for id,idx in pairs (sbidx) do  -- indexes of sidebands
-                              if tonumber(sgit)==tonumber(idx) then 
-                                dup=true 
-                                break
-                              end  -- duplicate found
-                            end   -- indexes of sidebands
-                          end-- sb freq match
-                        end  -- sidebands freq groups of index from higher group index
-                      end  -- higher sb groups
-                      if not (dup) then table.insert(nodups,sgit) end  -- add to the unique index list
-                      dup=false
-                    end -- sorted severity list
-                    sbfs[sbf]=nodups
-                    nodups={}
-                  end  -- #sev>1 
-                end  -- #sev>0
-              end-- sb severity sideband frequency
-              for sbf,enrg in pairs(sbfenrg) do  -- sb energy sideband frequency
-                enrgr,enrg=sort_pk_items(enrg, true)
-                --
-                -- the next section removes indicies that are included in a higher energy group
-                --
-                local nodups={}
-                local sl={} 
-                local highersbsg={}
-                if #enrg>0 then    -- #enrg>0        
-                  local sgi=enrg[1]
-                  table.insert(nodups,sgi) 
-                  if #enrg>1 then  -- #enrg>1 
-                    table.move(enrg,2,#enrg,1,sl)
-                    for x,sbgit in pairs (sl) do   -- sorted energy list
-                      highersbsg={}
-                      table.move(enrg,1,x,1,highersbsg)
-                      local dup=false
-                      local sgit =sbgit
-                      for sbgin,sbgi in ipairs (highersbsg) do -- higher sb groups
-                        if dup then break end
-                        local sgi=sbgi
-                        for sbgf,sbidx in pairs (pl.peaks[tonumber(sgi)].sidebands) do  -- sidebands freq groups of index from higher group index
-                          if sbgf==sbf then -- sb freq match
-                            local idx
-                            for id,idx in pairs (sbidx) do  -- indexes of sidebands
-                              if tonumber(sgit)==tonumber(idx) then 
-                                dup=true 
-                                break
-                              end  -- duplicate found
-                            end   -- indexes of sidebands
-                          end-- sb freq match
-                        end  -- sidebands freq groups of index from higher group index
-                      end  -- higher sb groups
-                      if not (dup) then table.insert(nodups,sgit) end  -- add to the unique index list
-                      dup=false
-                    end -- sorted energy list
-                    sbfe[sbf]=nodups
-                    nodups={}
-                  end  -- #enrg>1 
-                end  -- #enrg>0
-              end-- sb energy sideband frequency
-              pl['sorts']={harm_energy=he,harm_severity=hs,sval=sv,dif=df,sb_severity=sbfs,sb_energy=sbfe}
-            end --typ=='normal or true
-            debugprint('done demod matches', os.clock()-stime,ax)
-          end -- pl or axis
-        end -- ax
+                              if sbgf==sbf then -- sb freq match
+                                local idx
+                                for id,idx in pairs (sbidx) do  -- indexes of sidebands
+                                  if tonumber(sgit)==tonumber(idx) then 
+                                    dup=true 
+                                    break
+                                  end  -- duplicate found
+                                end   -- indexes of sidebands
+                              end-- sb freq match
+                            end  -- sidebands freq groups of index from higher group index
+                          end  -- higher sb groups
+                          if not (dup) then table.insert(nodups,sgit) end  -- add to the unique index list
+                          dup=false
+                        end -- sorted severity list
+                        sbfs[sbf]=nodups
+                        nodups={}
+                      end  -- #sev>1 
+                    end  -- #sev>0
+                  end-- sb severity sideband frequency
+                  for sbf,enrg in pairs(sbfenrg) do  -- sb energy sideband frequency
+                    enrgr,enrg=sort_pk_items(enrg, true)
+                    --
+                    -- the next section removes indicies that are included in a higher energy group
+                    --
+                    local nodups={}
+                    local sl={} 
+                    local highersbsg={}
+                    if #enrg>0 then    -- #enrg>0        
+                      local sgi=enrg[1]
+                      table.insert(nodups,sgi) 
+                      if #enrg>1 then  -- #enrg>1 
+                        table.move(enrg,2,#enrg,1,sl)
+                        for x,sbgit in pairs (sl) do   -- sorted energy list
+                          highersbsg={}
+                          table.move(enrg,1,x,1,highersbsg)
+                          local dup=false
+                          local sgit =sbgit
+                          for sbgin,sbgi in ipairs (highersbsg) do -- higher sb groups
+                            if dup then break end
+                            local sgi=sbgi
+                            for sbgf,sbidx in pairs (pl.peaks[tonumber(sgi)].sidebands) do  -- sidebands freq groups of index from higher group index
+                              if sbgf==sbf then -- sb freq match
+                                local idx
+                                for id,idx in pairs (sbidx) do  -- indexes of sidebands
+                                  if tonumber(sgit)==tonumber(idx) then 
+                                    dup=true 
+                                    break
+                                  end  -- duplicate found
+                                end   -- indexes of sidebands
+                              end-- sb freq match
+                            end  -- sidebands freq groups of index from higher group index
+                          end  -- higher sb groups
+                          if not (dup) then table.insert(nodups,sgit) end  -- add to the unique index list
+                          dup=false
+                        end -- sorted energy list
+                        sbfe[sbf]=nodups
+                        nodups={}
+                      end  -- #enrg>1 
+                    end  -- #enrg>0
+                  end-- sb energy sideband frequency
+                  pl['sorts']={harm_energy=he,harm_severity=hs,sval=sv,dif=df,sb_severity=sbfs,sb_energy=sbfe}
+                end --typ=='normal or true
+                debugprint('done demod matches', os.clock()-stime,ax)
+              end --#pl.peaks>0
+            end -- pl or axis
+
+          end -- ax
+        end --typ~=ave
       end -- has data
     end -- e
+    -- put in average agreement here
+    for ei,e in ipairs(machine.elements) do 
+      if e.data~=nil and e.data.spec~=nil and e.data.spec.cpl~=nil then
+        --for typ,axes in pairs(e.data.spec.cpl) do
+        local extremedata=false
+        for typ,axes in pairs(e.data.spec.cpl) do
+          if typ=='normal' then
+            local tn,tg,tl,tf,ag,al,tal,tag,hn,hm={},{},{},{},{},{},{},{},{},{}
+            for ax, pl in pairs(axes) do
 
+              for ei1,e1 in ipairs(machine.elements) do 
+
+                if e1.data~=nil and e1.data.spec~=nil and e1.data.spec.cpl~=nil then
+                  for typ1,pks in pairs(e1.data.spec.cpl) do
+                    if typ1=='average' then
+                      local ag,al,gr,ls,n,f,tg,tl,hn,hc,avdb=0,0,0,0,0,0,0,0,0,0,0
+                      for fr1,pk1 in pairs(pks.ave) do
+                        if fr1~='avetoave' and pk1.n>1 then
+                          local close=pk1.rnd*2
+                          if pk1.sord--[[*e1.speedratio]]/e.speedratio>10 then
+                            hn=hn+1
+                            close=close*3
+                            local ret,pi,pk,r=peaksearch(pksearchlist,ei,typ,ax,pk1.sord/e1.speedratio--[[/e.speedratio]],'ord',close) --,pk.bw)
+                            if pk~=nil and pk.mpct>1.5 then
+                              hc=hc+1 
+                            end
+                          end
+                          local ret,pi,pk,r=peaksearch(pksearchlist,ei,typ,ax,pk1.sord/e1.speedratio--[[/e.speedratio]],'ord',close) --,pk.bw)
+                          n=n+1
+                          if pk~=nil and (--[[pk1.sord*e.speedratio/e1.speedratio<30 or]] #pk.matches>0) then
+                            if pk.sord<10 then
+                              local vdb=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , pk.sval )
+                              if vdb>130 or vdb<50 then 
+                                extremedata=true
+                                -- goto exit
+                              end
+                            end
+                            avdb=avdb+20*math.log(pk.sval/pk1.sval,10)
+                            if pk.sval>pk1.sval*3    then 
+                              gr=gr+1
+                              ag=ag+pk.sval/(pk1.sval*3) 
+                            end
+                            if pk.sval>pk1.sval   then 
+
+                              tg=tg+1 
+                            end
+                            if  pk.sval<pk1.sval/15  then 
+                              al=al+pk.sval/(pk1.sval/15) 
+                              ls=ls+1
+                            end
+                            if  pk.sval<pk1.sval then
+
+                              tl=tl+1
+                            end
+                            f=f+1
+                          end
+                        end
+                      end
+                      --if n==f then table.insert(avesameas,ei1) end
+                      if machine.elements[ei].data.spec.cpl[typ][ax]['avecomp']==nil then machine.elements[ei].data.spec.cpl[typ][ax]['avecomp']={} end
+                      machine.elements[ei].data.spec.cpl[typ][ax]['avecomp'][ei1]={total=n,matches=f,hfmatched=hc,hftotal=hn,greater=gr,less=ls,avegreater=ag,aveless=al,tg=tg,tl=tl,avedbdiff=avdb}
+                      local _
+                      ::exit::
+                    end
+                  end
+                end
+              end
+            end
+            for ax, pl in pairs(axes) do
+              if pl.avecomp~=nil then
+                for ei1,data in pairs(pl.avecomp) do
+                  if tn[ei1]==nil then
+                    hn[ei1]=0
+                    hm[ei1]=0
+                    tn[ei1]=0
+                    tg[ei1]=0
+                    tf[ei1]=0
+                    tl[ei1]=0
+                    ag[ei1]=0
+                    al[ei1]=0
+                    tal[ei1]=0
+                    tag[ei1]=0
+                  end
+                  hn[ei1]=hn[ei1]+data.hftotal
+                  hm[ei1]=hm[ei1]+data.hfmatched
+                  tn[ei1]=tn[ei1]+data.total
+                  tf[ei1]=tf[ei1]+data.matches
+                  tg[ei1]=tg[ei1]+data.greater
+                  tl[ei1]=tl[ei1]+data.less
+                  ag[ei1]=ag[ei1]+data.avegreater
+                  al[ei1]=al[ei1]+data.aveless
+                  tal[ei1]=tal[ei1]+data.tl
+                  tag[ei1]=tag[ei1]+data.tg
+                end
+              end
+            end
+            for ei1,_ in pairs(tn) do
+              if machine.elements[ei].data~=nil and machine.elements[ei].data.spec~=nil and machine.elements[ei].data.spec.cpl~=nil then
+                local phf,pf=0,0
+                if hn[ei1]>0 then phf=round(100*hm[ei1]/hn[ei1]) end             
+                if tn[ei1]>0 then pf=round(100*tf[ei1]/tn[ei1]) end
+                local pg,pl,pga,pla=0,0,0,0
+                if tf[ei1]>0 then
+                  pg=round(100*tg[ei1]/tf[ei1])
+                  pl=round(100*tl[ei1]/tf[ei1])
+                  pga=round(100*tag[ei1]/tf[ei1]) 
+                  pla=round(100*tal[ei1]/tf[ei1])
+                end
+                local dbg=0
+                if ag[ei1]>1 --[[0 and tag[ei1]>0]] then dbg=round(20*math.log(ag[ei1]--[[/tag[ei1]],10),1) end
+                local dbl= 0 
+                if al[ei1]>1 --[[0 and tal[ei1]>0]] then dbl= round(20*math.log(al[ei1]--[[/tal[ei1]],10),1) end
+                if machine.elements[ei].data.spec.cpl[typ].a.aveavecomp==nil then 
+                  machine.elements[ei].data.spec.cpl[typ].a.aveavecomp={} 
+                  machine.elements[ei].data.spec.cpl[typ].a.avetoave={} 
+                end
+                machine.elements[ei].data.spec.cpl[typ].a.aveavecomp[ei1]={percentfound=pf,percentgreater=pg,percentless=pl,dbgreater=dbg,dbless=dbl,prctgreaterabs=pga,prctlessabs=pla,hfpercentfound=phf,hftotal=hn[ei1]}
+                if ei~=ei1 and machine.elements[ei].data.spec.cpl.average.avetoave~=nil and machine.elements[ei].data.spec.cpl.average.avetoave[ei1]~= nil then
+                  machine.elements[ei].data.spec.cpl[typ].a.avetoave[ei1]=machine.elements[ei].data.spec.cpl.average.avetoave[ei1]
+                end
+                if machine.elements[ei].data.spec.cpl.average~=nil and machine.elements[ei].data.spec.cpl.average.avetoave~=nil and machine.elements[ei].data.spec.cpl.average.avetoave.sameas~=nil then
+                  machine.elements[ei].data.spec.cpl[typ].a.avetoave.avesameas=machine.elements[ei].data.spec.cpl.average.avetoave.sameas
+                end
+                local _
+              end
+            end
+          end
+          --end
+        end
+      end
+    end
 
     for _,v in ipairs(rm_rulebase_info) do
       if v.lib.initialize then
@@ -1861,6 +2355,7 @@ function initialize_data( norm )
     end
     debugprint('Initialize Data Complete', os.clock()-stime)
     local _
+    remove_aves_from_cpl()
   end -- function
 
 
@@ -2310,6 +2805,7 @@ function initialize_data( norm )
     asn_failed_rules( k, ls )
     asn_warn_rules( k, ls )
     for i,v in pairs(t) do
+      debugprint(guid_name(i))
       asn_fault(i,v,ls)
     end
     ls.xml = ls.xml .. '</comp>'
@@ -2623,6 +3119,7 @@ function initialize_data( norm )
     local w = {xml = '<root version=\"' .. infer_solution_version ..'\" >' }
     asn_version( w )
     for n, t in pairs(g_infer_solution) do
+      debugprint(guid_name(n))
       asn_comp( n, t, w )
     end
     if l_fault_analysis then
@@ -2664,7 +3161,7 @@ function initialize_data( norm )
       f[g_fault]={severity=0,conf=g_conf}
     end
     if support~=nil then assert_support(support) end
-    debugprint( 'Comp: '..guid_name(g_shaft), 'Rule: '..guid_name(g_fault),'Sev: '.. f[g_fault].severity,'Conf: '.. f[g_fault].conf )
+    debugprint( 'Assert1 Comp: '..guid_name(g_shaft), 'Rule: '..guid_name(g_fault),'Sev: '.. f[g_fault].severity,'Conf: '.. f[g_fault].conf )
   end
 
   function assert2(severity,support)
@@ -2677,7 +3174,7 @@ function initialize_data( norm )
       f[g_fault].severity = severity
     end
     if support~=nil then assert_support(support) end
-    debugprint( 'Comp: '..guid_name(g_shaft), 'Rule: '..guid_name(g_fault),'Sev: '.. f[g_fault].severity,'Conf: '.. f[g_fault].conf )
+    debugprint( 'Assert2 Comp: '..guid_name(g_shaft), 'Rule: '..guid_name(g_fault),'Sev: '.. f[g_fault].severity,'Conf: '.. f[g_fault].conf )
   end
 
   function assert2increment(severity,support)
@@ -2691,7 +3188,7 @@ function initialize_data( norm )
       f[g_fault].severity = severity
     end
     if support~=nil then assert_support(support) end
-    debugprint( 'Comp: '..guid_name(g_shaft), 'Rule: '..guid_name(g_fault),'Sev: '.. f[g_fault].severity,'Conf: '.. f[g_fault].conf )
+    debugprint( 'Assert2i Comp: '..guid_name(g_shaft), 'Rule: '..guid_name(g_fault),'Sev: '.. f[g_fault].severity,'Conf: '.. f[g_fault].conf )
   end
 
   function assert3(confidence,support)
@@ -2702,7 +3199,19 @@ function initialize_data( norm )
       f[g_fault]={severity=0,conf=confidence}
     end
     if support~=nil then assert_support(support) end
-    debugprint( 'Comp: '..guid_name(g_shaft), 'Rule: '..guid_name(g_fault),'Sev: '.. f[g_fault].severity,'Conf: '.. f[g_fault].conf )
+    debugprint( 'Assert3 Comp: '..guid_name(g_shaft), 'Rule: '..guid_name(g_fault),'Sev: '.. f[g_fault].severity,'Conf: '.. f[g_fault].conf )
+  end
+
+-- Used to set absolute to -1 or 1
+  function assert3absolute(confidence,support)
+    local f = assert( g_faults_or_recs[g_shaft_number] )
+    if f[g_fault] then
+      f[g_fault].conf = confidence
+    else
+      f[g_fault]={severity=0,conf=confidence}
+    end
+    if support~=nil then assert_support(support) end
+    debugprint( 'assert3absolute Comp: '..guid_name(g_shaft), 'Rule: '..guid_name(g_fault),'Sev: '.. f[g_fault].severity,'Conf: '.. f[g_fault].conf )
   end
 ----------------------------------------
 ----------------------------------------
@@ -3875,7 +4384,7 @@ function initialize_data( norm )
     --         AND the match is not found in the normal data then this call will succeed.
     --         BUT if a match is found, there is no average data to complete the analysis
     --         and this call will fail and call assert.
-    safe_value_3( r1.aval, M_DATA, "spec", "average", axis )
+    if r1.aval~=nil then safe_value_3( r1.aval, M_DATA, "spec", "average", axis ) end -- fixed so it does not fail if no average DY 10/10/19
     return r1
   end
 
@@ -4023,7 +4532,7 @@ function initialize_data( norm )
     local spratios=get_comp_speed_ratios()
     local compspeedrat=spratios[cn]
     local result={}
-    if strtag=="" then
+    if pl.sorts~=nil and strtag=="" then
       for i,indx in pairs (pl.sorts.harm_severity) do
         local harm_indexes=pl.peaks[indx].harm_pk_index
         local severity=pl.peaks[indx].harm_severity
@@ -4325,7 +4834,7 @@ function initialize_data( norm )
     local pl = safe_spec_cpl( get_element(shaft_data_index), "normal", axis )
     local harm_info={}
     local harms={}
-
+    if pl.sorts==nil then return {found=false} end
     for _,indx in pairs (pl.sorts.harm_severity) do
       local harm_indexes=pl.peaks[indx].harm_pk_index
       local severity=pl.peaks[indx].harm_severity
@@ -4426,57 +4935,65 @@ function initialize_data( norm )
     end
 
     local ret_matches = {}
-    local max_order = 0      
+    local max_order = 0   
+    local function writematches(pki,i)
+      local order=round(pl.peaks[tonumber(pki)].sord/pl.peaks[i].sord)
+      if order>=1 then
+        if order> max_order then max_order = order end
+        local sr = pl.peaks[pki].sval
+        local mr = pl.peaks[pki].mval
+        local s = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), sr )
+        local m = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), mr )
+        local ar = pl.peaks[pki].aval
+        if ar~=nil then
+          local a = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ar )
+          table.insert( ret_matches, { 
+              ["order"] = order,
+              ["sval"]  = s, 
+              ["mval"]  = m, 
+              ["sord"]  = pl.peaks[pki].sord, 
+              ["sfreq"] = pl.peaks[pki].sfreq,
+              ["sbin"]  = pl.peaks[pki].sbin,
+              ["sdsi"]  = pl.peaks[pki].sdsi,
+              ["aval"]  = a, 
+              ["aord"]  = pl.peaks[pki].aord,
+              ["abin"]  = pl.peaks[pki].abin,
+              ["adsi"]  = pl.peaks[pki].adsi,
+              ["dif"]   = (s-a), 
+              ["pct"]   = (sr-ar)/ar,
+              ["mdif"]  = (s-m), 
+              ["mpct"]  = (sr-mr)/mr,
+              ['matches']=pl.peaks[pki].matches,
+              ['flags']=pl.peaks[pki].flags
+              } )
+        else
+          table.insert( ret_matches, { 
+              ["order"] = order,
+              ["sval"]  = s, 
+              ["mval"]  = m, 
+              ["sord"]  = pl.peaks[pki].sord, 
+              ["sfreq"] = pl.peaks[pki].sfreq,
+              ["sbin"]  = pl.peaks[pki].sbin,
+              ["sdsi"]  = pl.peaks[pki].sdsi,
+              ["mdif"]  = (s-m), 
+              ["mpct"]  = (s-m)/m,
+              ['matches']=pl.peaks[pki].matches,
+              ['flags']=pl.peaks[pki].flags
+              } ) 
+        end 
+      end -- if order>1
+    end
+
     for i,pk in pairs (pl.peaks) do
       local mtch = find_tag_in_matches( strtag, ti, pk.matches )
       if mtch then
-        for h,harm in ipairs(pk.harm_pk_index) do 
-          local order=round(pl.peaks[tonumber(harm)].sord/pl.peaks[i].sord)
-          if order>=1 then
-            if order> max_order then max_order = order end
-            local sr = pl.peaks[harm].sval
-            local mr = pl.peaks[harm].mval
-            local s = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), sr )
-            local m = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), mr )
-            local ar = pl.peaks[harm].aval
-            if ar~=nil then
-              local a = ConvertSpectrum( g_internal_unit, GetUnitFromId(g_unit_id), ar )
-              table.insert( ret_matches, { 
-                  ["order"] = order,
-                  ["sval"]  = s, 
-                  ["mval"]  = m, 
-                  ["sord"]  = pl.peaks[harm].sord, 
-                  ["sfreq"] = pl.peaks[harm].sfreq,
-                  ["sbin"]  = pl.peaks[harm].sbin,
-                  ["sdsi"]  = pl.peaks[harm].sdsi,
-                  ["aval"]  = a, 
-                  ["aord"]  = pl.peaks[harm].aord,
-                  ["abin"]  = pl.peaks[harm].abin,
-                  ["adsi"]  = pl.peaks[harm].adsi,
-                  ["dif"]   = (s-a), 
-                  ["pct"]   = (sr-ar)/ar,
-                  ["mdif"]  = (s-m), 
-                  ["mpct"]  = (sr-mr)/mr,
-                  ['matches']=pl.peaks[harm].matches,
-                  ['flags']=pl.peaks[harm].flags
-                  } )
-            else
-              table.insert( ret_matches, { 
-                  ["order"] = order,
-                  ["sval"]  = s, 
-                  ["mval"]  = m, 
-                  ["sord"]  = pl.peaks[harm].sord, 
-                  ["sfreq"] = pl.peaks[harm].sfreq,
-                  ["sbin"]  = pl.peaks[harm].sbin,
-                  ["sdsi"]  = pl.peaks[harm].sdsi,
-                  ["mdif"]  = (s-m), 
-                  ["mpct"]  = (s-m)/m,
-                  ['matches']=pl.peaks[harm].matches,
-                  ['flags']=pl.peaks[harm].flags
-                  } ) 
-            end 
-          end -- if order>1
-        end --- for h,harm
+        if pk.harm_pk_index~=nil and #pk.harm_pk_index>0 then
+          for h,harm in ipairs(pk.harm_pk_index) do 
+            writematches(harm,i)
+          end --- for h,harm
+        else
+          writematches(i,i)
+        end 
         break
       end -- if mtch
     end -- for i,pk 
@@ -4705,7 +5222,7 @@ function initialize_data( norm )
   function analyze_sidebands_by_order_cpl( order, sbtag,shaft_tag_index, shaft_data_index, axis ) 
     local element = shaft_tag_index
     local brg = shaft_data_index
-    local order=tonumber(order)
+    order=tonumber(order)
     local ele = get_element(brg)
     local pl = safe_spec_cpl( ele, "normal", axis )
     local shaftspeed=ele.speedratio
@@ -4722,6 +5239,7 @@ function initialize_data( norm )
     local start=binsearchpl(pl,order,'sord',shaftspeed)
     local pk
     local pkfound=false
+
     for pi=start,#pl.peaks,1 do
       pk=pl.peaks[pi]
       local isord,m,rem=is_a_multiple(order,pk.sord,.005)
@@ -4742,7 +5260,7 @@ function initialize_data( norm )
     for h,harm in ipairs(pk.harm_pk_index) do 
       local sb_matches={}
       if pl.peaks[harm].sidebands~=nil and pl.peaks[harm].sidebands[sbt]~=nil then
-        for s, sb in ipairs(pl.peaks[harm].sidebands[sbt]) do 
+        for si, sb in ipairs(pl.peaks[harm].sidebands[sbt]) do 
           local order1=round(pl.peaks[sb].sord/pl.peaks[harm].sord)
           local sideband=round((pl.peaks[sb].sord-pl.peaks[harm].sord)/sideord)
           if sb ~= harm then
@@ -4792,7 +5310,7 @@ function initialize_data( norm )
           end  -- order>= 1
         end  -- ipair(.sidebands)
       end -- .sidebands~=nil
-      local ord=round(pl.peaks[tonumber(harm)].sord/pl.peaks[i].sord)
+      local ord=round(pl.peaks[tonumber(harm)].sord/pk.sord)
       if ord> max_order then max_order = ord end
       local sr = pl.peaks[harm].sval
       local mr = pl.peaks[harm].mval
@@ -4879,6 +5397,7 @@ function initialize_data( norm )
     local sbfs={}
     local maxampindex
     local maxamp
+    if pl.sorts==nil then return {found=false} end
     for fr,grps in pairs (pl.sorts.sb_severity) do
       local  sb_groups={}
       if is_table(grps) then
@@ -4949,6 +5468,7 @@ function initialize_data( norm )
     local no_error=true
     local dsmi=alias
     local umtones={}
+    if pl.sorts==nil then return {found=false} end
     local sort=pl.sorts.sval
     if ghost then
       sort={}

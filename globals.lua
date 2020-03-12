@@ -10,10 +10,10 @@ vds_core_version ='1.0.4'
 -- 2 - All warnings except for: missing data
 -- 3 - All warnings
 -- 4 - Debug level.  Includes extracted peaks and rule map for each component.
-g_warning_level = 1
+g_warning_level = 3
 
 -- turns off all unnessecary printing to increase processing speed.
-g_debugprinting= true
+g_debugprinting= false
 
 -- Turns off normalization so data is processed at dataset speeds (manual or ea values)
 -- Note: normalize0 can be passed into initialize_data to turn off normalization as well.

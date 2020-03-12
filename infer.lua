@@ -218,7 +218,7 @@ function infer( do_analysis )
     for sn,cmp in ipairs(machine.components) do
       g_shaft_number = sn
       g_super_shaft_number = get_super_shaft_for_component( sn )
-      debugprint( "Evaulating " .. cmp.shaft )     
+      debugprint( "Evaluating Component  - " .. guid_name(cmp.shaft))     
       if primary==true then
         shaft_rules = MakePrimaryRuleTable( cmp, rules )
       else

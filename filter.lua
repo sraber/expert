@@ -1,4 +1,5 @@
--- filter.lua    Rev 4 9/4/19
+-- filter.lua    Rev 5 10/28/19
+--    if cp.comp==1 then return {} end -- If composite Do Not Throw ERROR Return FALSE NIL ERW 10/28/2019
 
 -- The # operator only works on arrays.  It's crazy, but a known issue for Lua.
 -- Lua is a beautiful language and we can deal with this one small problem.
@@ -687,6 +688,7 @@ end
 function get_comps_on_line( comp_number )
   local cn = comp_number or g_shaft_number
   local cp = assert( machine.components[cn], "Parameter Error: Component number not valid." )
+    if cp.comp==1 then return {} end -- If composite Do Not Throw ERROR Return FALSE NIL ERW 10/28/2019
   check_arg( cp.comp == 0, "get_comps_on_line not allowed to be called on a composite component." )
   local ssi = find_super_shaft_with_component( machine.supershafts, cn )
   check_arg( ssi>0, "Machine Component Number: "..cn.." was not found in any super shaft" )
@@ -709,7 +711,8 @@ end
 function get_comps_on_line_array( comp_number )
   local cn = comp_number or g_shaft_number
   local cp = assert( machine.components[cn], "Parameter Error: Component number not valid." )
-  check_arg( cp.comp == 0, "get_comps_on_line not allowed to be called on a composite component." )
+    if cp.comp==1 then return {} end -- If composite Do Not Throw ERROR Return FALSE NIL ERW 10/28/2019
+  check_arg( cp.comp == 0, "get_comps_on_line not allowed to be called on a composite component." ) -- if not composite error 9/5/19 DY
   local ssi = find_super_shaft_with_component( machine.supershafts, cn )
   check_arg( ssi>0, "Machine Component Number: "..cn.." was not found in any super shaft" )
   local ss = machine.supershafts[ssi]
