@@ -1,4 +1,7 @@
--- Revision 41 8/6/19
+-- Revision 43 2/28/2020
+--
+-- rev 43 2/28/2020 removed points and unique calls.  To simplify calculate average severity.
+--
 -- 00000000-0000-0000-0000-000000000000 MachineShaft GUID
 trouble_shoot=false -- turns on printing and extra output for troubleshooting
 -- Catagory guids
@@ -56,19 +59,15 @@ function z_forcingfrequencyfundamental(strtag,element,brg,straxis,strrotorname,t
   local rn=strrotorname or ''
   strtag = string.upper(strtag)
   debugprint (rn.." FF Fundamental rule started on "..rn.." Rotor",element,"bearing",brg,"axis",straxis,"for strtag",strtag)
-  increment_store_counter( "pts"..element..strtag )  -- count the attempts to call
-  local ffthld = threshold or 108
-  local smult = svrtymult or 1
+  local ffthld = threshold 
+  local smult = svrtymult 
   local ret_severity=0
   local close=.004
   local order=0
   local rFff={}
-  --Debugging code.
-  if strtag=='PMPVNS' then
-    local _
+  local conf=0
+  if strtag=='CPLGELEMS' then smult=smult/4 end
 
-  end 
-  z_countuniquecalls(strtag,element,brg,straxis)
 
   -- If the data is aliased from a pickup on a different shaft the speed
   -- returned is adjusted to bring it into the referance frame of the origional
@@ -80,23 +79,24 @@ function z_forcingfrequencyfundamental(strtag,element,brg,straxis,strrotorname,t
   -- ******************* MOTRTRBARS ******************************
   -- If this is motor bar analysis and the number of motor bars is not known
   -- try to determine them.
-  --local rbpeaks=unknownrotorbars('MOTRTRBARS',element,brg,straxis,strrotorname,threshold,svrtymult)
+
   if is_tag_and_value_not_known( 'MOTRTRBARS', strtag, element ) then
     -- Try to identify the motor bars in the data
 
 
     local rbpeaks=unknownrotorbars('MOTRTRBARS',element,brg,straxis,strrotorname,threshold,svrtymult)
-    --if true then
+
     if  rbpeaks.found then
       for pk,rFff in ipairs(rbpeaks.peaks) do
         local sval=rFff.sval
 
         local ordr=rFff.sord
-        local aval=rFff.aval or ConvertSpectrum(Unit.U_VDB , g_internal_unit  ,  constantaccelspec(g_no_ave_ff_spec,ordr,reford))
+        local aval=rFff.aval or ConvertSpectrum(Unit.U_VDB , g_internal_unit  ,  constantaccelspec(g_no_ave_ff_spec,ordr))
         -- REVIEW: Should include sfreq in the return from unknownrotorbars.  Try to standardize on match return data.
         --         Currently sfreq is not returned but sdsi is.
         local shcf=rFff.sord * machine.datasets[rFff.sdsi].speed
         ret_severity=ret_severity+rFff.severity
+        conf=stanford_conf(conf,.08)
         local datami=z_fault_tone_list(element,brg,straxis, ordr, sval, aval,rFff.severity,rFff.sdsi,rFff.sbin,'#'..pk.." Unk "..strtag.. ' tone on '..rn,"Unk "..strtag, shcf)
         z_flag_tone_as_found (element,brg,straxis,rFff.sfreq,datami)
       end
@@ -110,16 +110,17 @@ function z_forcingfrequencyfundamental(strtag,element,brg,straxis,strrotorname,t
     rFff=analyze_by_tag( strtag, element, brg, straxis )
     if rFff.found then
       local sval=rFff.sval
-      local aval=rFff.aval
+      local aval=rFff.aval or 0
 
       local ordr=rFff.sord
-      local diff=rFff.dif
+      local diff=rFff.dif or 0
       -- Determine if the motor is synchronous.
       local motor_is_syncronous,_,_= z_is_a_multiple(brg_speed ,machine.linef,close)
 
       if motor_is_syncronous==false then
         if diff > g_fault_tone_threshold  or( sval> g_significance_threshold and diff>3)  then
-          ret_severity=z_amplitude_weighted_severity(diff,sval,108)--diff--*(sval/140)  -- not amplitude weighting just yet on wundmental
+          conf=stanford_conf(conf,.1)
+          ret_severity=z_amplitude_weighted_severity(diff,sval,109)--diff--*(sval/140)  -- not amplitude weighting just yet on wundmental
           local datami=z_fault_tone_list(element,brg,straxis, ordr, sval, aval,ret_severity,rFff.sdsi,rFff.sbin, "1x of "..strtag.. ' on '..rn,"1x("..strtag..')', rFff.sfreq)
           z_flag_tone_as_found (element,brg,straxis,rFff.sfreq,datami)
         end
@@ -137,8 +138,8 @@ function z_forcingfrequencyfundamental(strtag,element,brg,straxis,strrotorname,t
       rFff=analyze_by_tag( strtag, element, brg, straxis )
       if rFff.found then
         local sval=rFff.sval
-        local aval=rFff.aval
-        local diff=rFff.dif
+        local aval=rFff.aval or 0
+        local diff=rFff.dif or 0
         local ordr=rFff.sord
         order=ordr
         -- If the peak match for the tag also has a match on LF or 2XLF then don't assert. 
@@ -150,7 +151,8 @@ function z_forcingfrequencyfundamental(strtag,element,brg,straxis,strrotorname,t
 
         if not is_lfx then
           if diff > g_fault_tone_threshold  or( sval> g_significance_threshold and diff>3)  then
-            ret_severity=z_amplitude_weighted_severity(diff,sval,108)--diff--*(sval/140)  -- not amplitude weighting just yet on wundmental
+            conf=stanford_conf(conf,.15)
+            ret_severity=z_amplitude_weighted_severity(diff,sval,109)--diff--*(sval/140)  -- not amplitude weighting just yet on wundmental
             --if sval >ffthld then
             -- ret_severity=ret_severity+z_high_level_severity(sval,ffthld)
             --end
@@ -166,6 +168,7 @@ function z_forcingfrequencyfundamental(strtag,element,brg,straxis,strrotorname,t
     local tot_severity = increment_store_value("svrty"..element..strtag, ret_severity*smult )
     debugprint (strtag,"fundamental fired - Severity",tot_severity,ret_severity)
     assert2(1)
+    assert3(conf)
     return true
   end 
   debugprint (rn.." "..strtag.." FF Fundamental FALSE")
@@ -203,14 +206,15 @@ end
 function z_forcingfrequencyharmonics(strtag,element,brg,straxis,howmany,strrotorname,threshold,svrtymult) -- checks for tone matches at harmonics of a forcing order (strtag)
   local rn=strrotorname or ''
   debugprint (rn.." FF harmonic rule started on "..rn.." Rotor",element,"bearing",brg,"axis",straxis, "for tag",strtag)
-  increment_store_counter( "pts"..element..strtag )
-  local hm= howmany or 10
-  local ffthld=threshold or 108
-  local smult=svrtymult or 1
+  local hm = howmany or 12
+  local ffthld=threshold 
+  local smult=svrtymult 
   local close=.004
   local ret_severity=0
+  local conf=0
   local fford=0
-  if strtag=='GRTTH' and hm>3 then hm=3 end
+  if strtag=='CPLGELEMS' then smult=smult/4 end
+  if strtag=='GRTTH' and (hm>3 and hm~=10) then hm=3 end
   -- 1X should be the only tag to return an order of 1, tagnot1x allows analysis to continue only if the tag order is not 1
   local tagnot1x=true
   if strtag~='1X' then 
@@ -218,7 +222,6 @@ function z_forcingfrequencyharmonics(strtag,element,brg,straxis,howmany,strrotor
     tagnot1x = tago.order~=1 
   end
   if tagnot1x then
-    z_countuniquecalls(strtag,element,brg,straxis)
     local sbt=string.upper(strtag)  
     local lookingforlf=string.match(sbt,'LF')=='LF'
     local _,alias,spdratio =z_get_brg_and_data_set_speed_ratio(element,brg)
@@ -229,7 +232,6 @@ function z_forcingfrequencyharmonics(strtag,element,brg,straxis,howmany,strrotor
     local tagord=1
 
     rFff=analyze_by_tag( strtag, element, brg, straxis )
--- debugprint ( strtag, element, brg, straxis ,rFff.found,rFff.sord,rFff.dif)
     if rFff.found then 
       fford=rFff.sord
       local rHff=analyze_harmonic_by_tag_cpl(strtag,element,brg,straxis)
@@ -240,10 +242,11 @@ function z_forcingfrequencyharmonics(strtag,element,brg,straxis,howmany,strrotor
             if trouble_shoot then debugprint (strtag,'harmonic matches',mtch.order,mtch.dif,'<<<<<<<<<<<<<<<<<<<<')      end
             if mtch.dif ~= nil then
               if (mtch.dif>g_fault_tone_threshold or (mtch.sval>g_significance_threshold and mtch.dif>3)) and mtch.order <= hm and mtch.order~=1 then 
-                local hsverity=z_amplitude_weighted_severity(mtch.dif,mtch.sval,108)
                 local order=nopointzero(tostring(round(mtch.order)))
+                local hsverity=z_amplitude_weighted_severity(mtch.dif,mtch.sval,109)*(1*order/hm+1)  -- added wieghting to higher order harmonics 12/2/19 adjusted waiting 
                 --if mtch.sval > ffthld then hsverity=hsverity+z_high_level_severity(mtch.sval,ffthld) end
                 if hsverity>1 then
+                  conf=stanford_conf(conf,.08)
                   ret_severity=ret_severity+hsverity
                   local linf=order.."x "..strtag.." on "..rn
                   local sinf=order.."x"..strtag
@@ -255,7 +258,6 @@ function z_forcingfrequencyharmonics(strtag,element,brg,straxis,howmany,strrotor
           end
         end
         if ret_severity>0 then
-          --debugprint ("svrty"..element..strtag,count,smult)
           local tot_severity = increment_store_value("svrty"..element..strtag, ret_severity*smult )
           debugprint (strtag,"harmonics fired - Severity",tot_severity,ret_severity)
           assert2(2)
@@ -296,15 +298,15 @@ function z_forcingfrequencysidebands(strtag,element,brg,straxis,strsbtag,howmany
   --function z_forcingfrequencyharmonics(strtag,element,brg,straxis,howmany,strrotorname,threshold,svrtymult) -- checks for tone matches at harmonics of a forcing order (strtag)
   local rn=strrotorname or ''
   debugprint (rn.." FF sideband rule started on "..rn.." Rotor",element,"bearing",brg,"axis",straxis, "for tag",strtag)
-  increment_store_counter( "pts"..element..strtag )
   local hmharm= howmany or 4
-  if strtag=='GRTTH' and hmharm>3 then hmharm=3 end
+  if strtag=='GRTTH' and (hmharm>3 and hmharm~=10) then hmharm=3 end
   local hmsb=30
-  local ffthld=threshold or 108
-  local smult=svrtymult or 1
+  local ffthld=threshold 
+  local smult=svrtymult
   local close=.004
   local ret_severity=0
   local fford=0
+  local conf=0
   strsbtag=strsbtag or '1X'
   -- 1X should be the only tag to return an order of 1, tagnot1x allows analysis to continue only if the tag order is not 1
   local tagnot1x=true
@@ -313,7 +315,6 @@ function z_forcingfrequencysidebands(strtag,element,brg,straxis,strsbtag,howmany
     tagnot1x = tago.order~=1 
   end
   if tagnot1x then
-    z_countuniquecalls(strtag,element,brg,straxis)
     local sbt=string.upper(strtag)  
     local lookingforlf=string.match(sbt,'LF')=='LF'
     local _,alias,spdratio =z_get_brg_and_data_set_speed_ratio(element,brg)
@@ -359,10 +360,12 @@ function z_forcingfrequencysidebands(strtag,element,brg,straxis,strsbtag,howmany
                 if lookingforlf or motor_is_syncronous or not (lookingforlf or motor_is_syncronous or islfx) then -- this suppresses multiples of 2*LF from being evaluated unless really looking for it  
                   if sb.dif ~= nil then
                     if (sb.dif>g_fault_tone_threshold or (sb.sval>g_significance_threshold and sb.dif>3))  then 
-                      local sbsverity=z_amplitude_weighted_severity(sb.dif,sb.sval,108)
                       local order=nopointzero(tostring(round(sb.order)))
+                      local sbsverity=z_amplitude_weighted_severity(sb.dif,sb.sval,109)*(1*order/hmharm+1)   -- added weighting to higher order harmonic sidebands
+
                       --if mtch.sval > ffthld then hsverity=hsverity+z_high_level_severity(mtch.sval,ffthld) end
                       if sbsverity>1 or true then
+                        conf=stanford_conf(conf,.05)
                         ret_severity=ret_severity+sbsverity
                         local sinf=nopointzero(sb.sidebandnumber)..'x('..strsbtag..')sb '..nopointzero(mtch.order)..'x'..strtag
                         local linf=nopointzero(sb.sidebandnumber)..'x('..strsbtag..') sideband of '..nopointzero(mtch.order)..'x '..strtag.." on "..rn
@@ -378,10 +381,10 @@ function z_forcingfrequencysidebands(strtag,element,brg,straxis,strsbtag,howmany
           end
         end
         if ret_severity>0 then
-          --debugprint ("svrty"..element..strtag,count,smult)
           local tot_severity = increment_store_value("svrty"..element..strtag, ret_severity*smult )
           debugprint (strsbtag..' sidebands '..strtag.." fired - Severity",tot_severity,ret_severity)
           assert2(2)
+          assert3(conf)
           return true
         end -- if sverity>0
       end -- if rHff.found
@@ -416,23 +419,10 @@ end
 function z_forcingfrequencyseverity(strtag,element,strrotorname) -- Calculate generic Forcing Function Normalized Severity
   local rn=strrotorname or ''
   debugprint ("Normalizing FF severity of "..strtag.. " on element "..element.." fault on rotor "..rn)
-  local _, calls = get_store_value("calls"..element..strtag)
-  local cls=pairscount(calls)
-  local check2,points = get_store_value("pts"..element..strtag)
-  --debugprint ("pts"..element..strtag,check2,points)
   local check,count = get_store_value("pt"..element..strtag)
-  --debugprint ("pt"..element..strtag,check,count)
-  count=count or points
-  --
   local check1,svrty = get_store_value("svrty"..element..strtag)
-  --debugprint ("svrty"..element..strtag,check1,svrty)
   svrty=svrty or 0
-  --
-  --debugprint (strtag,points,count,svrty)
   if check==true and svrty>1 then
-    if count-points<0 then
-      svrty= svrty*(points/count)
-    end
     local isgear=false
     local isflexcplg=false
     local shaftguid=machine.components[get_this_comp_number()].shaft
@@ -440,24 +430,26 @@ function z_forcingfrequencyseverity(strtag,element,strrotorname) -- Calculate ge
     isgear=machine.shafts[shaftguid]~=nil and machine.shafts[shaftguid].cat1~=nil and machine.shafts[shaftguid].cat1==categories.GEAR.guid
     isflexcplg=machine.shafts[shaftguid]~=nil and machine.shafts[shaftguid].cat1~=nil and machine.shafts[shaftguid].cat1==categories.COUPLING.guid
     isflexcplg=isflexcplg and machine.shafts[shaftguid].cat2~=nil and machine.shafts[shaftguid].cat2==categories.COUPLING.mincat.FLEX
-    local shaft=''
+    shaft=''
     local factor=1
+    if strtag=='GRTTH' and rn=='COMPRESSOR' then  
+      isgear=true
+    end
     if isgear then factor=get_custom_parameter('gmsevmult') or 2 end
     if isflexcplg then factor=3 end
-    svrty= svrty/cls*factor
+    svrty= svrty/count*factor
     local fault=''
     if svrty>=0 then
       if isgear and strtag=='GRTTH' then 
-        --fault= gear_analysis(strtag,element,1)
         put_store_value("GMTNS",svrty)
       end
       debugprint (strtag,"Fault Calculated Normalized Severity",count,svrty,fault,string.gsub(strtag,strtag,fault..' '..strtag,5))
       assert2(svrty)
-
       return true,svrty
     end
   end
   debugprint (rn.." "..strtag.." FF severity FALSE")
+  assert3(-1)
   return false,0
 end
 --
@@ -491,20 +483,18 @@ end
 ---- Generic Rotor Balance Check Function no average
 --**************************************************
 function rotorbalancenoave(element,brg,straxis,strrotorname,threshold,svrtymult) -- Generic Rotor Balance Check Function
-  --goto out
   threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
-  local ampthresh=tonumber(get_attribute_value("AMPTHRESH",element, 110)) 
+  local ampthresh=threshold 
   local rn=strrotorname or ''
   local rff={}
   debugprint ("Amplitube threshold balance rule started on "..rn.." Rotor",element,"bearing",brg,"axis",straxis)
-  increment_store_counter( "ptsbal")
-  local balthld=threshold or 108
+  local balthld=threshold or 109
   local smult=svrtymult or 1
   local sverity=0
+  local conf=0
   if strrotorname=="MOTRTRBARS" then
     local _
   end
-  z_countuniquecalls('1x','bal',brg,straxis)
   local rFBal=find_tag_info( "1X", element, brg, straxis )
   increment_store_counter( "ptbal" )
   if rFBal.found then
@@ -515,12 +505,12 @@ function rotorbalancenoave(element,brg,straxis,strrotorname,threshold,svrtymult)
 
     if dif>0 then
       sverity=z_amplitude_weighted_severity( dif,sval,110)
+      conf=stanford_conf(conf,.5)
       local datami
       if trouble_shoot then
         datami=z_fault_tone_list(element,brg,straxis,ordr, sval, aval,sverity,rFBal.dsi,rFBal.bin, "Rotor Balance "..rn.." sord-"..rFBal.freq,"1X", rFBal.sfreq) 
       else
         datami=z_fault_tone_list(element,brg,straxis,ordr, sval, aval,sverity,rFBal.dsi,rFBal.bin, "Rotor Balance "..rn,'1X', rFBal.freq) 
-        --debugprint (sverity)
       end
       z_flag_tone_as_found (element,brg,straxis, rFBal.sfreq ,datami)
       local check,count = get_store_value("balsvrty")
@@ -530,39 +520,45 @@ function rotorbalancenoave(element,brg,straxis,strrotorname,threshold,svrtymult)
         count = sverity*smult
       end
       if sverity~=0 then 
+        local check,axes = get_store_value("balaxes")
+        if check then
+          axes=axes..straxis
+        else
+          axes=straxis
+        end
+        put_store_value("balaxes",axes)
+
         put_store_value("balsvrty",count)
         assert2(1)
+        assert3(conf)
         debugprint ("Amplitude Threshold Balance rule fired - Severity",sverity,'dif',dif,'theshold', aval,'sval', sval)
         return true
       end
     end
   end  
-  ::out::
+
   debugprint ("Balance rule FALSE")
---]]
 
   return false
 end
 -- Generic Rotor Balance Check Function
 --**************************************************
 function rotorbalance(element,brg,straxis,strrotorname,threshold,svrtymult) -- Generic Rotor Balance Check Function
-  --goto out
   threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
   local rn=strrotorname or ''
   local rff={}
   debugprint ("Balance rule started on "..rn.." Rotor",element,"bearing",brg,"axis",straxis)
-  increment_store_counter( "ptsbal")
-  local balthld=threshold or 108
-  local smult=svrtymult or 1
+  local balthld=threshold 
+  local smult=svrtymult 
   local sverity=0
+  local conf=0
   if strrotorname=="MOTRTRBARS" then
     local _
   end
-  z_countuniquecalls('1x','bal',brg,straxis)
   local rFBal=find_tag_info( "1X", element, brg, straxis )
   if rFBal.found then 
     increment_store_counter( "ptbal" )
-    rFBal=z_get123orders( "1X", element, brg, straxis )
+    rFBal=z_get123orders( "1X", element, brg, straxis, true )
     if rFBal.found and rFBal.sval1x>0 then
       local sval=rFBal.sval1x
       local aval=rFBal.aval1x
@@ -582,7 +578,7 @@ function rotorbalance(element,brg,straxis,strrotorname,threshold,svrtymult) -- G
 
       if ((dif > g_fault_tone_threshold or (dif >3  and sval>g_significance_threshold)) and haveave) or (not(haveave) and dif>0) then
         sverity=z_amplitude_weighted_severity( dif,sval,balthld)
-
+        conf=stanford_conf(conf,.5)
         local datami
         if trouble_shoot then
           datami=z_fault_tone_list(element,brg,straxis,ordr, sval, aval,sverity,rFBal.sdsi1x,rFBal.bin1x, "Rotor Balance "..rn.." sord-"..rFBal.sfreq,"1X", rFBal.sfreq) 
@@ -598,18 +594,24 @@ function rotorbalance(element,brg,straxis,strrotorname,threshold,svrtymult) -- G
           count = sverity*smult
         end
         if sverity~=0 then 
+
+          local check,axes = get_store_value("balaxes")
+          if check then
+            axes=axes..straxis
+          else
+            axes=straxis
+          end
+          put_store_value("balaxes",axes)
           put_store_value("balsvrty",count)
           assert2(1)
+          assert3(conf)
           debugprint ("Balance rule fired - Severity",sverity,'dif',dif,'aval', aval,'sval', sval)
           return true
         end
       end
     end  
   end
-  ::out::
   debugprint ("Balance rule FALSE")
---]]
-
   return false
 end
 --
@@ -618,23 +620,24 @@ end
 function rotorbalanceseverity(strrotorname) -- Calculate balance Normalized Severity function
   local name=strrotorname or ""
   debugprint (name..' Balance severity normalization started')
-  local check2,pts = get_store_value("ptsbal")
   local check,count = get_store_value("ptbal")
   local check1,svrty = get_store_value("balsvrty")
-  local _, calls = get_store_value("calls"..'bal'..'1x')
-  local cls=pairscount(calls)
   if check==true then
-    if count-pts<0 then
-      svrty= svrty*(pts/count)
+    svrty= svrty/count*4  -- normalized to one axis and multiplied times 3 for scaling
+    local chax,axes = get_store_value("balaxes")
+    local t,r=false,false
+    if chax then
+      t=string.match(axes,'t')=='t'
+      r=string.match(axes,'r')=='r'      
     end
-    svrty= svrty/cls*4  -- normalized to one axis and multiplied times 3 for scaling
-    if svrty>=0 then
+    if svrty>=0 and t and r then
       debugprint ("-- Calculate Normalized Severity --",count,svrty,name,"Rotor Balance" )
       assert2(svrty)
       return true
     end
   end
   debugprint ("Balance severity false")
+  assert2(0)
   return false
 end
 --
@@ -644,20 +647,20 @@ function rotorsoftfoot(element,brg,strrotorname, threshold, svrtymult) -- Generi
   threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
   local cn=get_this_comp_number()
   local orient=get_comp_orientation(cn)
-  if orient== 'v' then 
-    debugprint('Vertical component - Softfoot rule terminated')
-    return false 
-  end
+  --if orient== 'v' then 
+  --debugprint('Vertical component - Softfoot rule terminated')
+  --return false 
+  --end
   local rn=strrotorname or ''
   debugprint ("Softfoot rule started on "..rn.." Rotor",element,"bearing",brg)
-  increment_store_counter( "sfpts")
-  local balthld = threshold or 108
-  local smult = svrtymult or 1
+  local balthld = threshold 
+  local smult = svrtymult 
   local sverity=0
-  z_countuniquecalls('1x','sf',brg,'t')
+  local conf=0
   local rF1xt=analyze_by_tag( "1X", element, brg, "t" )
   increment_store_counter( "sfpt" )
   local rF1xr=analyze_by_tag( "1X", element, brg, "r" )
+  local check,count
   if rF1xr.found and rF1xt.found then
     local tsval=rF1xt.sval
     local taval=rF1xt.aval
@@ -665,32 +668,43 @@ function rotorsoftfoot(element,brg,strrotorname, threshold, svrtymult) -- Generi
     local rsval=rF1xr.sval
     local raval=rF1xr.aval
     local rdif=rF1xr.dif
-    local trdif=tsval-rsval
-    if tdif>3 and trdif>10 and tsval>g_significance_threshold  and tdif-rdif>3 then
+    local trsvdif=tsval-rsval
+    local travdif=taval-raval
+    local trddif=tdif-rdif
+    if tdif>3 and trsvdif>10 and tsval>g_significance_threshold and trddif>6 then
       sverity=z_amplitude_weighted_severity(tdif,tsval,balthld)-- tdif -- not amplitude weighted sverity
-      --debugprint (sverity)
-      if tsval >balthld then
-        --sverity=sverity+z_high_level_severity(tsval,balthld)
-      end
+      conf=stanford_conf(conf,.5)
       local datami=z_fault_tone_list(element,brg,"t", rF1xt.sord, tsval, taval,sverity,rF1xt.sdsi,rF1xt.sbin, "Rotor Softfoot "..rn,"1X", rF1xt.sfreq)
       z_flag_tone_as_found (element,brg,"t", rF1xt.sfreq ,datami)
       increment_store_counter( "sfpt" )
-      local check,count = get_store_value("sfsvrty")
+      check,count = get_store_value("sfsvrty")
       if check==true then
         count = count + sverity*smult
       else
         count = sverity*smult
       end
-      if sverity~=0 then
-        put_store_value("sfsvrty",count)
-        assert2(1)
-        debugprint (rn.." softfoot rule fired - Severity",sverity)
-        return true
+    elseif rdif>3 and trsvdif>-10 and rsval>g_significance_threshold and trddif>-6  then  -- 2/18/2020 dy added r > t aswell
+      sverity=z_amplitude_weighted_severity(rdif,rsval,balthld)
+      conf=stanford_conf(conf,.5)
+      local datami=z_fault_tone_list(element,brg,"r", rF1xr.sord, rsval, raval,sverity,rF1xr.sdsi,rF1xr.sbin, "Rotor Softfoot "..rn,"1X", rF1xr.sfreq)
+      z_flag_tone_as_found (element,brg,"r", rF1xr.sfreq ,datami)
+      increment_store_counter( "sfpt" )
+      check,count = get_store_value("sfsvrty")
+      if check==true then
+        count = count + sverity*smult
+      else
+        count = sverity*smult
       end
     end
-  end
+    if sverity~=0 then
+      put_store_value("sfsvrty",count)
+      assert2(1)
+      assert3(conf)
+      debugprint (rn.." softfoot rule fired - Severity",sverity)
+      return true
+    end
 
-  ::out::
+  end
   debugprint(rn.." Softfoot rule FALSE")
   return false
 end
@@ -700,16 +714,10 @@ end
 function rotorsoftfootseverity (strrotorname) -- Soft foot severity nomalization function 
   local rn=strrotorname or ''
   debugprint (rn.." Softfoot severity rule started")  
-  local check2,pts = get_store_value("sfpts")
   local check,count = get_store_value("sfpt")
   local check1,svrty = get_store_value("sfsvrty")
-  local _, calls = get_store_value("calls"..'sf'..'1x')
-  local cls=pairscount(calls)
-  if check==true then
-    if count-pts<0 then
-      svrty= svrty*(pts/count)
-    end
-    svrty= svrty/cls*3 -- times 4 for scaling
+  if check then
+    svrty= svrty/count*3 -- times 4 for scaling
     if svrty>=0 then
       debugprint ("-- Calculate Motor Softfoot Normalized Severity --",count,svrty,rn.." Softfoot SSSSSSSSSSSSSSSSSSSSSSSSSSS")
       assert2(svrty)
@@ -723,20 +731,20 @@ end
 --**************************************************
 function rotoroverhungbalancenoave(element,brg,strrotorname, threshold, svrtymult) -- Generic Rotor overhung mass imbalance Check Function no ave
   threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
-  local ampthresh=tonumber(get_attribute_value("AMPTHRESH",element, 110)) 
+  local ampthresh=threshold
   local rn=strrotorname or ''
   debugprint ("Overhung balance rule started on "..rn.." Rotor",element,"bearing",brg)
-  increment_store_counter( "ptsob")
-  local balthld = threshold or 108
-  local smult = svrtymult or 1
+
+  local balthld = threshold 
+  local smult = svrtymult 
   local sverity=0
-  z_countuniquecalls('1x','oh',brg,'a')
+  local conf=0
   local rF1xa=find_tag_info( "1X", element, brg, "a" )
   increment_store_counter( "ptob" )
-  z_countuniquecalls('1x','oh',brg,'r')
   local rF1xr=find_tag_info( "1X", element, brg, "r" )
-  z_countuniquecalls('1x','oh',brg,'t')
+  increment_store_counter( "ptob" )
   local rF1xt=find_tag_info( "1X", element ,brg, "t" )
+  increment_store_counter( "ptob" )
   if rF1xa.found then
     local asval=rF1xa.value
     local aaval=ampthresh
@@ -752,23 +760,21 @@ function rotoroverhungbalancenoave(element,brg,strrotorname, threshold, svrtymul
     if  adif>0 then 
 
       local asverity=z_amplitude_weighted_severity( adif,asval,ampthresh)
-
+      conf=stanford_conf(conf,.4)
       sverity=sverity+asverity
       datami=z_fault_tone_list(element,brg,"a", rF1xa.order, asval, aaval,asverity,rF1xa.dsi,rF1xa.bin, "Rotor Imbalance - Overhung",'1X',rF1xa.freq) 
       z_flag_tone_as_found (element,brg,"a", rF1xa.freq ,datami)
     end
     if rdif>0 then 
-
+      conf=stanford_conf(conf,.2)
       local rsverity=z_amplitude_weighted_severity( rdif,rsval,ampthresh)
       sverity=sverity+rsverity
       datami=z_fault_tone_list(element,brg,"r",rF1xr.order, rsval, raval,rsverity,rF1xr.dsi,rF1xr.bin, "Rotor Imbalance - Overhung",'1X',  rF1xr.freq) 
       z_flag_tone_as_found (element,brg,"r", rF1xr.freq ,datami)
     end
     if tdif>0 then 
-
+      conf=stanford_conf(conf,.2)
       local tsverity= z_amplitude_weighted_severity( tdif,rsval,ampthresh)
-
-
       sverity=sverity+tsverity
       datami=z_fault_tone_list(element,brg,"t",rF1xt.order, tsval, taval,tsverity,rF1xt.dsi,rF1xt.bin, "Rotor Imbalance - Overhung",'1X', rF1xt.freq) 
       z_flag_tone_as_found (element,brg,"t", rF1xt.freq ,datami)
@@ -782,13 +788,12 @@ function rotoroverhungbalancenoave(element,brg,strrotorname, threshold, svrtymul
     if sverity~=0 then
       put_store_value("obsvrty",count)
       assert2(1)
+      assert3(conf)
       debugprint (rn.." overhung balance rule fired - Severity",sverity)
       return true
     end
     --end
   end
-
-  ::out::
   debugprint(rn.." overhung balance rule FALSE")
   return false
 end
@@ -798,17 +803,16 @@ function rotoroverhungbalance(element,brg,strrotorname, threshold, svrtymult) --
   threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
   local rn=strrotorname or ''
   debugprint ("Overhung balance rule started on "..rn.." Rotor",element,"bearing",brg)
-  increment_store_counter( "ptsob")
-  local balthld = threshold or 108
-  local smult = svrtymult or 1
+  local balthld = threshold 
+  local smult = svrtymult 
   local sverity=0
-  z_countuniquecalls('1x','oh',brg,'a')
+  local conf=0
   local rF1xa=analyze_by_tag( "1X", element, brg, "a" )
   increment_store_counter( "ptob" )
-  z_countuniquecalls('1x','',brg,'r')
   local rF1xr=analyze_by_tag( "1X", element, brg, "r" )
-  z_countuniquecalls('1x','',brg,'t')
+  increment_store_counter( "ptob" )
   local rF1xt=analyze_by_tag( "1X", element ,brg, "t" )
+  increment_store_counter( "ptob" )
   if rF1xa.found then
     local asval=rF1xa.sval
     local aaval=rF1xa.aval
@@ -822,28 +826,22 @@ function rotoroverhungbalance(element,brg,strrotorname, threshold, svrtymult) --
     local datami
     --if (asval > rsval) and (asval > tsval) then
     if adif>g_fault_tone_threshold or ( adif>3 and asval>g_significance_threshold) then 
-
-      local asverity= adif -- not amplitude weighted
-
-      if asval >balthld then asverity=asverity + z_high_level_severity(asval,balthld)  end
+      conf=stanford_conf(conf,.4)
+      local asverity= z_amplitude_weighted_severity(adif,asval,balthld)  --adif -- not amplitude weighted
       sverity=sverity+asverity
       datami=z_fault_tone_list(element,brg,"a", rF1xa.sord, asval, aaval,asverity,rF1xa.sdsi,rF1xa.sbin, "Rotor Imbalance - Overhung",'1X', rF1xa.sfreq) 
       z_flag_tone_as_found (element,brg,"a", rF1xa.sfreq ,datami)
     end
     if rdif>g_fault_tone_threshold or (rdif>3 and rsval>g_significance_threshold) then 
-
-      local rsverity=rdif  -- not amplitude weighted
-
-      if rsval >balthld then rsverity=rsverity+z_high_level_severity(rsval,balthld)  end
+      conf=stanford_conf(conf,.2)
+      local rsverity=z_amplitude_weighted_severity( rdif,rsval,balthld)  --rdif  -- not amplitude weighted
       sverity=sverity+rsverity
       datami=z_fault_tone_list(element,brg,"r",rF1xr.sord, rsval, raval,rsverity,rF1xr.sdsi,rF1xr.sbin, "Rotor Imbalance - Overhung",'1X',  rF1xr.sfreq) 
       z_flag_tone_as_found (element,brg,"r", rF1xr.sfreq ,datami)
     end
     if tdif>g_fault_tone_threshold or (tdif> 3 and tsval>g_significance_threshold) then 
-
-      local tsverity= tdif -- not amplitude weighted
-
-      if tsval >balthld then tsverity=tsverity+z_high_level_severity(tsval,balthld)  end
+      conf=stanford_conf(conf,.2)
+      local tsverity= z_amplitude_weighted_severity( tdif,tsval,balthld)  ---tdif -- not amplitude weighted
       sverity=sverity+tsverity
       datami=z_fault_tone_list(element,brg,"t",rF1xt.sord, tsval, taval,tsverity,rF1xt.sdsi,rF1xt.sbin, "Rotor Imbalance - Overhung",'1X', rF1xt.sfreq) 
       z_flag_tone_as_found (element,brg,"t", rF1xt.sfreq ,datami)
@@ -857,13 +855,12 @@ function rotoroverhungbalance(element,brg,strrotorname, threshold, svrtymult) --
     if sverity~=0 then
       put_store_value("obsvrty",count)
       assert2(1)
+      assert3(conf)
       debugprint (rn.." overhung balance rule fired - Severity",sverity)
       return true
     end
     --end
   end
-
-  ::out::
   debugprint(rn.." overhung balance rule FALSE")
   return false
 end
@@ -873,16 +870,10 @@ end
 function rotoroverhungbalanceseverity (strrotorname) -- Overhung balance severity nomalization function 
   local rn=strrotorname or ''
   debugprint (rn.." overhung balance severity rule started")
-  local check2,pts = get_store_value("ptsob")
   local check,count = get_store_value("ptob")
   local check1,svrty = get_store_value("obsvrty")
-  local _, calls = get_store_value("calls"..'oh'..'1x')
-  local cls=pairscount(calls)
   if check==true then
-    if count-pts<0 then
-      svrty= svrty*(pts/count)
-    end
-    svrty= svrty/cls *1 -- normalize to one axis and multiplied time 3 for scaling
+    svrty= svrty/count*1 -- normalize to one axis and multiplied time 3 for scaling
     if svrty>=0 then
       debugprint ("-- Calculate Rotor Overhung Balance Normalized Severity --",count,svrty,rn.." overhung balance SSSSSSSSSSSSSSSSSSSSSSSSSSS")
       assert2(svrty)
@@ -900,23 +891,31 @@ function rotorlooseness(element,brg,straxis,strrotorname,threshold,svrtymult) --
   local rn=string.upper(strrotorname) or ''
   local cplg=(rn=='COUPLING')
   local cn=get_this_comp_number()
+  local sn=get_this_super_shaft()
   debugprint ("Looseness rule started on ",rn," Rotor",element,"bearing",brg,"axis",straxis)
-  local loosthld = threshold or 108
-  local smult = svrtymult or 1
-  local ampwtsvth=108
+  local loosthld = threshold 
+  local smult = svrtymult
+  local ampwtsvth=109
   if cplg then
     ampwtsvth=100
   end
   local x=''
   local sverity=0 
   local hcount=0
+  local conf=0
   local howmanyharmonics=20
-  z_countuniquecalls('los','',brg,straxis)
-  increment_store_counter( "ptsloos")
+  local cplgloosepresent={}
+  local cplgfound,cplgval=get_store_value('cplgprt')
+  if cplgfound then cplgloosepresent=cplgval end
   local rFff=find_tag_info( "1X", element, brg, straxis )
   if rFff.found then
     increment_store_counter( "ptloos")
-    if rn=='PUMP' then
+    local startorder=3
+    if rn=='PURIFIER' then
+      startorder=2
+      local _
+    end 
+    if rn=='GEAR' then
       local _
     end 
     -- REVIEW: Experimental.. needs eval
@@ -929,16 +928,34 @@ function rotorlooseness(element,brg,straxis,strrotorname,threshold,svrtymult) --
       local ordcount=rFLoos.count
       local ordmatches=rFLoos.matches
       local firstorder=1000
+      local knownff={}
+      -- preview the detected peaks for significant exceedences and forcing freqencies so known forcing frequencies are not included in looseness
       for ord,tm in pairs(ordmatches) do 
         if tm.dif== nil then break end
         local isff=false
         for _,mtch in ipairs(tm.matches) do
+          local ele=0
+          for i,ei in pairs(machine.components[cn].map) do
+            if ei==mtch.cn then 
+              ele=ei 
+              break
+            end
+          end
           local x=string.match(string.upper(mtch.tag),'X')
-          if x==nil and not (mtch.tag=='MOTPOLES' or mtch.tag=='LF' ) and cn==mtch.cn then isff=true end
+          if x~='X' and not (mtch.tag=='MOTPOLES' or mtch.tag=='LF' ) --[[and ele==mtch.cn]] then
+            isff=true 
+            knownff[tm.order]=true
+            if mtch.tag=='GRTTH' and tm.order>5 then
+              local sides=round(tm.order/10)
+              for s=tm.order-sides,tm.order+sides,1 do
+                knownff[s]=true
+              end
+            end
+          end
         end
         local islfx,mtrissync = z_peak_is_2XLF_mult(tm.sfreq,rFff.freq)
         if not (islfx and mtrissync) and not (isff) then  -- tone not multiple of line frequency and 1x not too close syncronous to tell or a forcing frequency (pump vanes, fan blases, etc.)
-          if tm.order >= 3 and tm.order <= howmanyharmonics  then-- Only count orders 3 thru howmanyharmonics
+          if tm.order >= startorder and tm.order <= howmanyharmonics  then-- Only count orders 3 thru howmanyharmonics
             if firstorder==1000 then firstorder=tm.order end
             if cplg then
               local cpl=(math.fmod(tm.order,3)==0)
@@ -954,12 +971,13 @@ function rotorlooseness(element,brg,straxis,strrotorname,threshold,svrtymult) --
         if cplg then
           for ord,tm in pairs(ordmatches) do
             local isff=false
+            local cpl=(math.fmod(tm.order,3)==0)
             for _,mtch in ipairs(tm.matches) do
               x=string.match(string.upper(mtch.tag),'X')
-              if x==nil and not (mtch.tag=='MOTPOLES' or mtch.tag=='LF') then isff=true end
+              if (x~='X' and not (mtch.tag=='MOTPOLES' or mtch.tag=='LF' or mtch.tag=='CPLGELEMS')) then isff=true end
             end
-            if tm.order >= 3 and tm.order <= howmanyharmonics and not (isff) and firstorder<11 then-- Only count orders 3-howmanyharmonics
-              local cpl=(math.fmod(tm.order,3)==0)
+            if tm.order >= startorder and tm.order <= howmanyharmonics and not (isff) and firstorder<11 and not(knownff[tm.order]) then-- Only count orders 3-howmanyharmonics and not a forcing frequency
+
               if tm.dif> g_fault_tone_threshold or (tm.dif>3 and tm.sval>g_significance_threshold) then 
                 tdif=tdif+tm.dif
                 tt=tt+1
@@ -974,26 +992,28 @@ function rotorlooseness(element,brg,straxis,strrotorname,threshold,svrtymult) --
             end
           end
         end
-        if (cdif/cc>ncdif/nc  and cplg) then
+        if (cdif/cc>ncdif/nc  and cplg) or cplg then
           for ord,tm in pairs(ordmatches) do 
-            if tm.order >= 3 and tm.order <= howmanyharmonics then -- Only count orders 3-howmanyharmonics
+            if tm.order >= startorder and tm.order <= howmanyharmonics then -- Only count orders 3-howmanyharmonics
               local isff=false
               for _,mtch in ipairs(tm.matches) do
                 x=string.match(string.upper(mtch.tag),'X')
-                if x==nil and not (mtch.tag=='MOTPOLES' or mtch.tag=='LF') then isff=true end
+                if x~='X' and not (mtch.tag=='MOTPOLES' or mtch.tag=='LF' or mtch.tag=='CPLGELEMS') then isff=true end
               end
-              if math.fmod(tm.order,3)==0 and not (isff) and firstorder<11 then
+              if math.fmod(tm.order,3)==0 and not (isff) and firstorder<11 and not(knownff[tm.order]) then
                 local sval=tm.sval
                 local aval=tm.aval
                 local dif=tm.dif
                 local islfx,mtrissync = z_peak_is_2XLF_mult(tm.sfreq,rFff.freq)
                 if not (islfx) or not(islfx and mtrissync) then  -- tone not multiple of line frequency and 1x not too close syncronous to tell
                   if dif> g_fault_tone_threshold or (dif>3 and tm.sval>g_significance_threshold) then
+                    if tm.order==3 then
+                      cplgloosepresent['cplg'..brg]=true
+                      put_store_value('cplgprt',cplgloosepresent)
+                    end
                     hcount=hcount+1
                     local hsverity=z_amplitude_weighted_severity(dif,sval,ampwtsvth)
-                    if sval >loosthld then
-                      --hsverity=hsverity+z_high_level_severity(sval,loosthld)
-                    end
+                    conf=stanford_conf(conf,.2)
                     sverity=sverity+hsverity
                     debugprint ('Rotor '..tm.order..'x harmonic found in '..straxis..'axis on '..rn, sverity,dif,hsverity)
                     local datami=z_fault_tone_list(element,brg,straxis, tm.order, sval, aval,hsverity,tm.sdsi,tm.sbin,tm.order.."x(1X) Coupling Wear on "..rn,tm.order..'x(1X)', tm.sfreq) 
@@ -1008,9 +1028,9 @@ function rotorlooseness(element,brg,straxis,strrotorname,threshold,svrtymult) --
             local isff=false
             for _,mtch in ipairs(tm.matches) do
               x=string.match(string.upper(mtch.tag),'X')
-              if x==nil and not (mtch.tag=='MOTPOLES' or mtch.tag=='LF') then isff=true end
+              if x~='X' and not (mtch.tag=='MOTPOLES' or mtch.tag=='LF' or mtch.tag=='BWLSPIN') then isff=true end
             end
-            if tm.order >= 3 and tm.order <= howmanyharmonics and not (isff) and firstorder<11  then -- Only count orders 3-howmanyharmonics
+            if tm.order >= startorder and tm.order <= howmanyharmonics and not (isff) and firstorder<11  and not(knownff[tm.order]) then -- Only count orders 3-howmanyharmonics
               local sval=tm.sval
               local aval=tm.aval
               local dif=tm.dif
@@ -1021,12 +1041,9 @@ function rotorlooseness(element,brg,straxis,strrotorname,threshold,svrtymult) --
                     hcount=hcount+1
 
                     local hsverity=z_amplitude_weighted_severity(dif,sval,ampwtsvth)
-
-                    --if sval >loosthld then
-                    --hsverity=hsverity+sval-loosthld
-                    --end
+                    conf=stanford_conf(conf,.1)
                     sverity=sverity+hsverity
-                    debugprint ('Rotor '..tm.order..'x harmonic found in '..straxis..'axis on '..rn, sverity,dif,hsverity)
+                    debugprint ('Rotor '..tm.order..'x harmonic found in '..straxis..'axis on '..rn, sval,sverity,dif,hsverity)
                     local datami=z_fault_tone_list(element,brg,straxis, tm.order, sval, aval,hsverity,tm.sdsi,tm.sbin,tm.order.."x(1X) Rotor Looseness on "..rn,tm.order..'x(1X)', tm.sfreq) 
                     z_flag_tone_as_found (element,brg,straxis, tm.sfreq ,datami)
                   end
@@ -1049,6 +1066,7 @@ function rotorlooseness(element,brg,straxis,strrotorname,threshold,svrtymult) --
       end
       put_store_value("loossvrty",count)
       assert2(1) 
+      assert3(conf)
       if cplg then
         debugprint (rn.." Coupling Wear rule fired - Severity",sverity*smult," from ",howmanyharmonics,"harmonics")
       else
@@ -1066,27 +1084,28 @@ function rotorloosenessseverity(element,strrotorname) --  Rotor Looseness Severi
   local cplg=(rn=='COUPLING')
   --element=element or 2
   debugprint (rn.." Looseness severity started")
-  local check2, points = get_store_value("ptsloos")
   local check,count = get_store_value("ptloos")
-  count=count or points
   local check1,svrty = get_store_value("loossvrty")
-  local _, calls = get_store_value("calls"..''..'los')
-  local cls=pairscount(calls)
+  local cplgloosepresent={}
+  local cplgfound,cplgval=get_store_value('cplgprt')
+  if cplgfound then cplgloosepresent=cplgval end
+  local cplgcount=0
+  for _,cpltrue in pairs(cplgloosepresent) do
+    cplgcount=cplgcount+1 
+  end
   svrty=svrty or 0
   if check==true then
-    if count-points<0 then
-      svrty= svrty*(points/count)
-    end
     local scaling=2-- times 2.25 for looseness scaling, adjusted after comarison to historic calls by DY 2/4/2018
     if cplg then scaling=2 end
-    svrty= svrty/cls*scaling 
-    if svrty>=0 then
+    svrty= svrty/count*scaling
+    if svrty>=0 and (not(cplg) or (cplg and cplgcount==2)) then
       debugprint ("-- Calculate Normalized Severity --",count,svrty,rn," looseness LLLLLLLLLLLLLLLLLLLLLLLLLLLLL")
       assert2(svrty)
       return true
     end
   end
   debugprint ("Looseness severity FALSE")
+  assert3absolute(-1)
   return false
 end
 --
@@ -1094,7 +1113,9 @@ end
 
 --
 --  This function get the dif and sval for 1x thru 3x
-function z_get123orders(strtag,element,brg,straxis) --  This function gets the dif and sval for 1x thru 3x order of 1X.
+function z_get123orders(strtag,element,brg,straxis,significant) --  This function gets the dif and sval for 1x thru 3x order of 1X.
+  significant=significant or false
+  local pct=1.5-- 1.5=3.5 dB 2=6 dB ...
   local r1X = find_tag_info( strtag, element, brg, straxis ) 
   if r1X == nil or r1X.found == false then 
     return {["found"]=false}
@@ -1127,8 +1148,11 @@ function z_get123orders(strtag,element,brg,straxis) --  This function gets the d
   if rFHarm.found == true then 
     local set=false
     for i,match in ipairs(rFHarm.matches) do
+      if match.sfreq<3 then
+        local _
+      end
       if round (match.order) == 1 then
-        if match.sfreq~=nil then
+        if match.sfreq~=nil and ((significant and match.mpct>pct) or not(significant)) then  -- add nograss
           set=true
           ord1freq=match.sfreq
           local islfx,mtrissync = z_peak_is_2XLF_mult(match.sfreq,ord1freq)
@@ -1141,7 +1165,7 @@ function z_get123orders(strtag,element,brg,straxis) --  This function gets the d
         end 
       end
       if round (match.order) == 2 then
-        if match.sfreq~=nil then
+        if match.sfreq~=nil and ((significant and match.mpct>pct) or not(significant)) then
           ord2freq=match.sfreq
           local islfx,mtrissync = z_peak_is_2XLF_mult(match.sfreq,ord1freq)
           if not (islfx and mtrissync) then  -- tone not multiple of line frequency and 1x not too close syncronous to tell
@@ -1156,7 +1180,7 @@ function z_get123orders(strtag,element,brg,straxis) --  This function gets the d
         end 
       end
       if round(match.order) == 3 then 
-        if match.sfreq~=nil then
+        if match.sfreq~=nil and ((significant and match.mpct>pct) or not(significant)) then
           ord3freq=match.sfreq
           local islfx,mtrissync = z_peak_is_2XLF_mult(match.sfreq,ord1freq)
           if not (islfx and mtrissync) then  -- tone not multiple of line frequency and 1x not too close syncronous to tell
@@ -1173,7 +1197,7 @@ function z_get123orders(strtag,element,brg,straxis) --  This function gets the d
     end
     if not(set) then return {["found"]=false} end
   end
-  return { ["found"]=true, ["sval1x"] = ord1val, ["aval1x"] = ord1aval, ["dif1x"] = ord1dif, ["sval2x"] = ord2val, ["aval2x"] = ord2aval, ["dif2x"] = ord2dif, ["sval3x"] = ord3val, ["aval3x"] = ord3aval, ["dif3x"] = ord3dif , ['sord1x'] = ord1ord , ['sord2x'] = ord2ord , ['sord3x'] = ord3ord ,['sfreq']=ord1freq,['bin1x']=ord1bin,['bin2x']=ord2bin,['bin3x']=ord3bin,['dsi1x']=ord1dsi,['dsi2x']=ord2dsi,['dsi3x']=ord3dsi,['ord1freq']=ord1freq,['ord2freq']=ord12freq,['ord2freq']=ord2freq}
+  return { ["found"]=true, ["sval1x"] = ord1val, ["aval1x"] = ord1aval, ["dif1x"] = ord1dif, ["sval2x"] = ord2val, ["aval2x"] = ord2aval, ["dif2x"] = ord2dif, ["sval3x"] = ord3val, ["aval3x"] = ord3aval, ["dif3x"] = ord3dif , ['sord1x'] = ord1ord , ['sord2x'] = ord2ord , ['sord3x'] = ord3ord ,['sfreq']=ord1freq,['bin1x']=ord1bin,['bin2x']=ord2bin,['bin3x']=ord3bin,['dsi1x']=ord1dsi,['dsi2x']=ord2dsi,['dsi3x']=ord3dsi,['ord1freq']=ord1freq,['ord2freq']=ord2freq,['ord2freq']=ord2freq}
 end
 --
 --
@@ -1183,12 +1207,11 @@ end
 function couplingangularmisalignment(element,brg,threshold,svrtymult) -- Coupling Angular Misalignment Check Function
   threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
   debugprint ("Angular misalignment started on Rotor",element,"bearing",brg)
-  local balthld = threshold or 108
-  local smult = svrtymult or 1
+  local balthld = threshold
+  local smult = svrtymult 
   local sverity=0
-  z_countuniquecalls('1x','aa',brg,'a')
-  increment_store_counter( "angpts" )
-  local rFAm=z_get123orders( "1X", element, brg, "a" )
+  local conf=0
+  local rFAm=z_get123orders( "1X", element, brg, "a",true )
   if rFAm.found then 
     increment_store_counter( "angpt" )
     local datami
@@ -1197,6 +1220,7 @@ function couplingangularmisalignment(element,brg,threshold,svrtymult) -- Couplin
       --debugprint (dif1x)
       if dif1x>g_fault_tone_threshold or (dif1x>3 and rFAm.sval1x>g_significance_threshold) then
         local brgsv = z_amplitude_weighted_severity( dif1x,rFAm.sval1x,balthld)
+        conf=stanford_conf(conf,.3)
         sverity=brgsv
         if rFAm.sval1x >balthld then sverity=sverity+z_high_level_severity(rFAm.sval1x,balthld) end
         datami=z_fault_tone_list(element,brg,"a", rFAm.sord1x, rFAm.sval1x, rFAm.aval1x,brgsv,rFAm.dsi1x,rFAm.bin1x, "Coupling Misalignment - Angular",'1x(1X)', rFAm.sfreq) 
@@ -1208,14 +1232,14 @@ function couplingangularmisalignment(element,brg,threshold,svrtymult) -- Couplin
         if dif2x>g_fault_tone_threshold or (dif2x>3 and rFAm.sval2x>g_significance_threshold) then 
           brgsv= z_amplitude_weighted_severity( dif2x,rFAm.sval2x,balthld)
           sverity=sverity+brgsv
-          --if rFAm.sval2x >balthld then sverity=sverity+z_high_level_severity(rFAm.sval2x,balthld) end
+          conf=stanford_conf(conf,.1)
           datami=z_fault_tone_list(element,brg,"a", rFAm.sord2x,rFAm.sval2x , rFAm.aval2x,brgsv,rFAm.dsi2x,rFAm.bin2x, "Coupling Misalignment - Angular",'2x(1X)', rFAm.sfreq*2) 
           z_flag_tone_as_found (element,brg,"a", rFAm.ord2freq ,datami)
         end
         if dif3x>g_fault_tone_threshold or ( dif3x>3 and rFAm.sval3x>g_significance_threshold) then 
           brgsv= z_amplitude_weighted_severity( dif3x,rFAm.sval3x,balthld)
           sverity=sverity+brgsv
-          --if rFAm.sval3x >balthld then sverity=sverity+z_high_level_severity(rFAm.sval3x,balthld) end
+          conf=stanford_conf(conf,.1)
           datami=z_fault_tone_list(element,brg,"a",  rFAm.sord3x, rFAm.sval3x, rFAm.aval3x,brgsv,rFAm.dsi3x,  rFAm.bin3x, "Coupling Misalignment - Angular",'3x(1X)', rFAm.sfreq*3) 
           z_flag_tone_as_found (element,brg,"a", rFAm.ord3freq ,datami)
         end 
@@ -1229,6 +1253,7 @@ function couplingangularmisalignment(element,brg,threshold,svrtymult) -- Couplin
       end
       if dif1x>0 then
         local brgsv = z_amplitude_weighted_severity( dif1x,rFAm.sval1x,ampthresh)
+        conf=stanford_conf(conf,.3)
         sverity=brgsv
         datami=z_fault_tone_list(element,brg,"a", rFAm.sord1x, rFAm.sval1x, ampthresh,brgsv,rFAm.dsi1x,rFAm.bin1x, "Coupling Misalignment - Angular",'1x(1X)', rFAm.sfreq) 
         z_flag_tone_as_found (element,brg,"a", rFAm.ord1freq ,datami)
@@ -1238,6 +1263,7 @@ function couplingangularmisalignment(element,brg,threshold,svrtymult) -- Couplin
 
         if dif2x>0 then 
           brgsv= z_amplitude_weighted_severity( dif2x,rFAm.sval2x,ampthresh)
+          conf=stanford_conf(conf,.1)
           sverity=sverity+brgsv
           --if rFAm.sval2x >balthld then sverity=sverity+z_high_level_severity(rFAm.sval2x,balthld) end
           datami=z_fault_tone_list(element,brg,"a", rFAm.sord2x,rFAm.sval2x , ampthresh,brgsv,rFAm.dsi2x,rFAm.bin2x, "Coupling Misalignment - Angular",'2x(1X)', rFAm.sfreq*2) 
@@ -1245,6 +1271,7 @@ function couplingangularmisalignment(element,brg,threshold,svrtymult) -- Couplin
         end
         if dif3x>0 then 
           brgsv= z_amplitude_weighted_severity( dif3x,rFAm.sval3x,ampthresh)
+          conf=stanford_conf(conf,.1)
           sverity=sverity+brgsv
           --if rFAm.sval3x >balthld then sverity=sverity+z_high_level_severity(rFAm.sval3x,balthld) end
           datami=z_fault_tone_list(element,brg,"a",  rFAm.sord3x, rFAm.sval3x, ampthresh,brgsv,rFAm.dsi3x,  rFAm.bin3x, "Coupling Misalignment - Angular",'3x(1X)', rFAm.sfreq*3) 
@@ -1252,7 +1279,6 @@ function couplingangularmisalignment(element,brg,threshold,svrtymult) -- Couplin
         end
       end
     end
-    increment_store_counter( "angpt" )
     if sverity>0 then
       local check,count = get_store_value("angsvrty")
       if check==true then
@@ -1263,6 +1289,7 @@ function couplingangularmisalignment(element,brg,threshold,svrtymult) -- Couplin
       put_store_value("angsvrty",count)
       debugprint ("Angular Misalignment rule fired - Severity",sverity,count,"AAAAAAAAAAAAAAAAAAAAAA")
       assert2(1)
+      assert3(conf)
       return true
     end
   end
@@ -1275,18 +1302,10 @@ function couplingangularmisalignmentseverity () -- Coupling Angular Misalignment
   debugprint ("Angular misalignment severity started")
 
   local check,count = get_store_value("angpt")
-  local check2,pts = get_store_value("angpts")
-  count = count or pts
   local check1,svrty = get_store_value("angsvrty")
-  local _, calls = get_store_value("calls"..'aa'..'1x')
-  local cls=pairscount(calls)
   svrty=svrty or 0
   if check==true then
-    --debugprint (check,count,check1,svrty)
-    if count-pts<0 then
-      svrty= svrty*(pts/count)
-    end
-    svrty= svrty/cls*3 -- times 7.3 for scaling set by comparison to history DY 2/4/2019
+    svrty= svrty/count*3 -- times 7.3 for scaling set by comparison to history DY 2/4/2019
     if svrty>=0 then
       debugprint ("-- Calculate Normalized Severity --",count,svrty,"Angular Misalignment SSSSSSSSSSSSSSSSSSSSSSSSSSS")
       assert2(svrty)
@@ -1302,13 +1321,12 @@ end
 function couplingparallelmisalignment(element,brg,threshold,svrtymult) -- Coupling Parallel Misalignment Check Function
   threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
   debugprint ("Parallel misalignment started on Rotor",element,"bearing",brg)
-  local ampthresh=tonumber(get_attribute_value("AMPTHRESH",element, 110))
-  local balthld = threshold or 108
-  local smult = svrtymult or 1
+  local ampthresh=threshold
+  local balthld = threshold 
+  local smult = svrtymult 
   local sverity=0
-  increment_store_counter( "parpts" )
-  z_countuniquecalls('pa','pa',brg,'r')
-  local rFpmr=z_get123orders( "1X", element, brg, "r" )
+  local conf=0
+  local rFpmr=z_get123orders( "1X", element, brg, "r",true )
   if rFpmr.found then 
     increment_store_counter( "parpt" )
     local dif1xr=rFpmr.dif1x
@@ -1331,6 +1349,7 @@ function couplingparallelmisalignment(element,brg,threshold,svrtymult) -- Coupli
       if sval2xr>sval1xr  then
         if ((dif2xr>g_fault_tone_threshold or (dif2xr>3 and sval2xr>g_significance_threshold))and not (fxdth)) or (fxdth and dif2xr>0) then 
           local rsverity=z_amplitude_weighted_severity(dif2xr,rFpmr.sval2x,balthld)
+          conf=stanford_conf(conf,.4)
           sverity=sverity+rsverity  
           datami= z_fault_tone_list(element,brg,"r", sord2xr, sval2xr, sval2xr-dif2xr,rsverity,rFpmr.dsi2x,rFpmr.bin2x, "Coupling Misalignment - Parallel",'2x(1X)',rFpmr.sfreq*2)
           z_flag_tone_as_found (element,brg,"r", rFpmr.ord2freq,datami)
@@ -1338,16 +1357,17 @@ function couplingparallelmisalignment(element,brg,threshold,svrtymult) -- Coupli
 
         if ((dif3xr>g_fault_tone_threshold or (dif3xr>3 and rFpmr.sval3x>g_significance_threshold)) and not(fxdth)) or (fxdth and dif3xr>0) then 
           local rsverity=z_amplitude_weighted_severity(dif3xr,rFpmr.sval3x,balthld)
-          sverity=sverity+rsverity 
+          sverity=sverity+rsverity
+          conf=stanford_conf(conf,.1)
           datami= z_fault_tone_list(element,brg,"r", rFpmr.sord3x, rFpmr.sval3x, rFpmr.sval3x-dif3xr,rsverity ,rFpmr.dsi3x,rFpmr.bin3x,"Coupling Misalignment - Parallel",'3x(1X)',rFpmr.sfreq*3)
           z_flag_tone_as_found (element,brg,"r", rFpmr.ord3freq ,datami)
         end
       end
     end
   end
-  z_countuniquecalls('pa','pa',brg,'t')
-  local rFpmt=z_get123orders( "1X", element, brg, "t" )
+  local rFpmt=z_get123orders( "1X", element, brg, "t" ,true)
   if rFpmt.found then
+    increment_store_counter( "parpt" )
     local dif1xt=rFpmt.dif1x
     local dif2xt=rFpmt.dif2x
     local dif3xt=rFpmt.dif3x 
@@ -1368,12 +1388,14 @@ function couplingparallelmisalignment(element,brg,threshold,svrtymult) -- Coupli
       if  sval2xt>sval1xt then
         if ((dif2xt>g_fault_tone_threshold or (dif2xt>3 and sval2xt>g_significance_threshold)) and not (fxdth)) or (fxdth and dif2xt>0) then 
           local tsverity= z_amplitude_weighted_severity(dif2xt,rFpmt.sval2x,balthld)
+          conf=stanford_conf(conf,.4)
           sverity=sverity + tsverity 
           datami= z_fault_tone_list(element,brg,"t", sord2xt, sval2xt, sval2xt-dif2xt,tsverity,rFpmt.dsi2x,rFpmt.bin2x, "Coupling Misalignment - Parallel",'2x(1X)',rFpmt.sfreq*2)
           z_flag_tone_as_found (element,brg,"t",  rFpmt.ord2freq,datami)
         end
         if ((dif3xt>g_fault_tone_threshold or (dif3xt>3 and rFpmt.sval3x>g_significance_threshold))and not (fxdth)) or (fxdth and dif3xt>0) then 
           local tsverity= z_amplitude_weighted_severity(dif3xt,rFpmt.sval3x,balthld) 
+          conf=stanford_conf(conf,.1)
           sverity=sverity+ tsverity
           datami= z_fault_tone_list(element,brg,"t", rFpmt.sord3x, rFpmt.sval3x, rFpmt.sval3x-dif3xt,tsverity,rFpmt.dsi3x,rFpmt.bin3x, "Coupling Misalignment - Parallel",'3x(1X)',rFpmt.sfreq*3)
           z_flag_tone_as_found (element,brg,"t", rFpmt.ord3freq ,datami)
@@ -1393,6 +1415,7 @@ function couplingparallelmisalignment(element,brg,threshold,svrtymult) -- Coupli
       put_store_value("parsvrty",count)
       debugprint ("Parallel Misalignment rule fired - Severity",count,"PPPPPPPPPPPPPPPPPP")
       assert2(1)
+      assert3(conf)
       return true
     end
   end
@@ -1407,17 +1430,9 @@ function couplingparallelmisalignmentseverity () -- Coupling Parallel Misalignme
 
   debugprint ("Parallel Misalignment normalize started")
   local check,count = get_store_value("parpt")
-  local check2,pts = get_store_value("parpts")
-  count=count or pts
-  local check1,svrty = get_store_value("parsvrty")
-  local _, calls = get_store_value("calls"..'pa'..'pa')
-  local cls=pairscount(calls)
   svrty=svrty or 0
   if check==true then
-    if count-pts<0 then
-      svrty= svrty*(pts/count)
-    end
-    svrty= svrty/cls*5 -- time 5 for scaling set by comaprison to history DY 2/4/2019
+    svrty= svrty/count*5 -- time 5 for scaling set by comaprison to history DY 2/4/2019
     if svrty>=0 then
       debugprint ("-- Calculate Normalized Severity --",count,svrty,"parallel Misalignment PPPPPPPPPPPPPPPPPPPPPPPPPPPPP")
       assert2(svrty)
@@ -1434,11 +1449,10 @@ end
 --
 -- Ski slope avaluation (ski slope is BB noise < 3x1X with the the lower frequencies > than higher frequencies)
 --
-function bearingLFskislopes(element,brg,straxis,strrotorname,threshold,svrtymult) -- Ski slope avaluation (ski slope is BB noise < 3x1X with the the lower frequencies > than higher frequencies)
+function bearingLFskislopes(element,brg,straxis,strrotorname,threshold,svrtymult)-- Ski slope avaluation (ski slope is BB noise < 3x1X with the the lower frequencies > than higher frequencies)
   local bearing,alias,spdratio =z_get_brg_and_data_set_speed_ratio(element,brg)
   local stop,start=maximum_data_range(element,brg,straxis)
   local rn=strrotorname or ''
-  z_countuniquecalls('SS','',brg,straxis)
   if start==nil and stop==nil then
     debugprint (rn.." No data to analysis - Ski Slope FALSE")
     return false
@@ -1446,9 +1460,8 @@ function bearingLFskislopes(element,brg,straxis,strrotorname,threshold,svrtymult
   if bearing==alias then
     threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
     debugprint ("Ski slope evaluation started on "..rn.." Rotor",element,"bearing",brg,"axis",straxis)
-    increment_store_counter( "SSpts"..rn )
-    local ssthld=threshold  or 100
-    local smult=svrtymult or .5
+    local ssthld=threshold-10
+    local smult=svrtymult*.5
     local rF1x=analyze_by_tag( "1X", element, brg, straxis )
     increment_store_counter( "SSpt"..rn )
     local ordr1x=rF1x.sord
@@ -1462,6 +1475,14 @@ function bearingLFskislopes(element,brg,straxis,strrotorname,threshold,svrtymult
         end
       end 
     end
+    local avedsi=0
+    if rF1x.found==false then
+      if machine.elements[alias]~=nil and machine.elements[alias].data~=nil and machine.elements[alias].data.spec~=nil and machine.elements[alias].data.spec.average[straxis]~=nil and machine.elements[alias].data.spec.average[straxis][1]~=nil then
+        avedsi=machine.elements[alias].data.spec.average[straxis][1]
+      end
+    else
+      avedsi=rF1x.adsi
+    end
     if sr1x ~=nil then
       local ssdif=0
       local ssval=0
@@ -1474,22 +1495,23 @@ function bearingLFskislopes(element,brg,straxis,strrotorname,threshold,svrtymult
       local sverity=0
       local lastsev=0
       local up,down=0,0
+      local conf=0
       local rFss
       local maxamp,maxdif, maxampfreq, lastord,firstord=0,0,0,0,0
       for i=start,stop,-1*step do
-        if rF1x.adsi~=nil and rF1x.adsi>0 then
-          rFss = analyze_noise_floor( math.min(i, i+step),math.max(i, i+step), brg, straxis )
+        if avedsi>0 then
+          rFss = analyze_noise_floor( math.min(i, i+step),math.max(i, i+step), brg, straxis,true )
           ssdif=rFss.dif
           ssval=rFss.sval
           sdsi=rFss.sdsi
         else
-          sdsi, ssval = get_avg_noise( i, i+step, brg, "normal", straxis, true ) 
+          sdsi, ssval = get_avg_noise( math.min(i, i+step),math.max(i, i+step), brg, "normal", straxis, true ) 
           if ssval==nil then break end
           ssdif=ssval-constantaccelspec(g_no_ave_non_ff_spec,(i+i+step)/2)
         end
 
-        if ssdif > 3 then 
-          sverity=z_amplitude_weighted_severity(ssdif,ssval,108) 
+        if ssdif~=nil and  ssdif > 3 then 
+          sverity=z_amplitude_weighted_severity(ssdif,ssval,109) 
           if lastord==0 then lastord=i end
           firstord=i-step
           if maxamp<ssval then 
@@ -1501,10 +1523,8 @@ function bearingLFskislopes(element,brg,straxis,strrotorname,threshold,svrtymult
             maxampfreq=i
           end
         end
-
-        -- if ssval >ssthld then sverity=sverity+z_high_level_severity(ssval,ssthld)  end
         if i<2 then
-          if lastsval-1>ssval and ssdif<20 then
+          if ssdif~=nil and ssval~=nil and lastsval-1>ssval and ssdif<20 then
             down=down+1
             up=0
             if down>1 then
@@ -1514,6 +1534,7 @@ function bearingLFskislopes(element,brg,straxis,strrotorname,threshold,svrtymult
               maxamp=0
               maxdif=0
               maxampfreq=0
+              conf=0
             end
           else
             up=up+1
@@ -1528,6 +1549,7 @@ function bearingLFskislopes(element,brg,straxis,strrotorname,threshold,svrtymult
         elseif up>1 then
           totalsvrity = totalsvrity + sverity*smult
         end
+        conf=stanford_conf(conf,.04)
         debugprint ( straxis..': '..round(math.min(i, i+step),1)..' - '..round(math.max(i, i+step),1)..' val: '..round(ssval) ..' dif: '..round(ssdif)..' sev: '.. round(sverity) ..' tsev: '..round(totalsvrity))
       end
       if totalsvrity>0 then
@@ -1536,6 +1558,7 @@ function bearingLFskislopes(element,brg,straxis,strrotorname,threshold,svrtymult
         put_store_value("sssvrty"..rn,count+totalsvrity)
         debugprint ("Ski Slope rule fired- Severity "..count+totalsvrity.." on "..rn.." rotor")
         assert2(1)
+        assert3(conf)
         return true
       end
     end
@@ -1548,23 +1571,12 @@ end
 function bearingLFskislopeseverity(strrotorname)-- Ski slope normalization function
   local rn=strrotorname or ''
   debugprint ("Normalizing LF Ski Slope severity fault on rotor "..rn)
-  local check2,points = get_store_value("SSpts"..rn)
-  --debugprint ("sspts"..rn,check2,points)
   local check,count = get_store_value("SSpt"..rn)
-  --debugprint ("sspt"..rn,check,count)
-  count=count or points
   --
   local check1,svrty = get_store_value("sssvrty"..rn)
-  --debugprint ("sssvrty"..rn,check1,svrty)
   svrty=svrty or 0
-  local _, calls = get_store_value("calls"..''..'SS')
-  local cls=pairscount(calls)
-  --debugprint ('LSSS',points,count,svrty)
   if check==true then
-    if count-points<0 then
-      svrty= svrty*(points/count)
-    end
-    svrty= svrty/cls
+    svrty= svrty/count
     if svrty>=0 then
       debugprint ("Ski Slope Issue Calculated Normalized Severity",count,svrty)
       assert2(svrty)
@@ -1576,10 +1588,12 @@ function bearingLFskislopeseverity(strrotorname)-- Ski slope normalization funct
 end
 --  **************************************************************
 ---- Gear Broadband Noise evaluation 
-function gearbroadbandnoise(element,brg,straxis,strrotorname,strtag,threshold,svrtymult) -- Gear BBN evaluates BBN at 1,2,3x gearmesh +/- 10%
+function gearbroadbandnoise(element,brg,straxis,howmany,strrotorname,strtag,threshold,svrtymult) -- Gear BBN evaluates BBN at 1,2,3x gearmesh +/- 10%
   threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult) 
   local gmbbn=false
   local gmbbnsev=0
+  local conf=0
+  howmany=howmany or 3
   -- 1X should be the only tag to return an order of 1, tagnot1x allows analysis to continue only if the tag order is not 1
   local tagnot1x=true
   if strtag~='1X' then 
@@ -1587,11 +1601,11 @@ function gearbroadbandnoise(element,brg,straxis,strrotorname,strtag,threshold,sv
     tagnot1x = tago.order~=1 
   end
   if tagnot1x then
-    local th=threshold or 90
-    local sm=svrtymult or 1  
+    local th=threshold-20
+    local sm=svrtymult 
     local bearing,alias,spdratio =z_get_brg_and_data_set_speed_ratio(element,brg)
     local rn=strrotorname..'GBBN'..element
-    z_countuniquecalls(strtag,element,brg,straxis)
+
     local _,dstart,_,dstop=maximum_data_range(element,brg,straxis)
     local tago=get_tag_order( strtag, element,-1 )
     if dstop==nil or dstart==nil or tago.order<1 or dstop<dstart or tago.order>dstop then return false,0 end
@@ -1599,20 +1613,21 @@ function gearbroadbandnoise(element,brg,straxis,strrotorname,strtag,threshold,sv
     local fstep= 2*pm/20
     local startf,stopf
     local dsi=0
-    for h=1,3,1 do
+    for h=1,howmany,1 do
       startf=h*tago.order*spdratio-pm
       stopf=h*tago.order*spdratio+pm
       if startf<dstop then
         if stopf>dstop then stopf=dstop end
-        local gm,gmsev=z_broadbandnoise(element,brg,straxis,dsi,rn,startf,stopf,fstep,th,sm)
+        local gm,gmsev,hconf=z_broadbandnoise(element,brg,straxis,dsi,rn,startf,stopf,fstep,th,sm)
         if gm then
           gmbbn=true
           gmbbnsev=gmbbnsev+gmsev
+          conf=stanford_conf(conf,hconf)
         end
       end
     end
   end
-  return gmbbn , gmbbnsev
+  return gmbbn , gmbbnsev,conf
 end
 --
 -- Broadband Noise evaluation 
@@ -1641,8 +1656,8 @@ function rotorbroadbandnoiseHF(element,brg,straxis,strrotorname,startf,stopf,ste
   if stopf<=startf then return false end
   local fstep= step or (stopf-startf)/20
   if fstep<startf/20 then return false end
-  local th=threshold or 90
-  local sm=svrtymult or 1
+  local th=threshold-20
+  local sm=svrtymult
   local dsi=0
   return z_broadbandnoise(element,brg,straxis,dsi,rn,startf,stopf,fstep,th,sm)
 end
@@ -1657,10 +1672,74 @@ function bearingREbroadbandnoise(element,brg,straxis,strrotorname,startf,stopf,s
   if stopf<=startf then return false end
   local fstep= step or (stopf-startf)/20
   if fstep<startf/20 then return false end
-  local th=threshold-10 or 90
-  local sm=svrtymult or 1
+  local th=threshold-20
+  local sm=svrtymult
   local dsi=0
   return z_broadbandnoise(element,brg,straxis,dsi,rn,startf,stopf,fstep,th,sm)
+end
+--- pump canvitation Broadband Noise evaluation 
+function pumpcavitiationbroadbandnoise(element,brg,straxis,strrotorname,startf,stopf,step,threshold,svrtymult) -- An evaluation of HF cavitation broadband noise from 20 to 100 orders spectra in 50 steps.
+  threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
+  local _,start,_,stop=maximum_data_range(element,brg,straxis)
+  local rF1x=analyze_by_tag( "1X", element, brg, straxis )
+  local maxord=50
+  if rF1x.found then
+    maxord=2000/rF1x.sfreq
+  end
+  startf=startf or start
+  if startf<20 then startf=20 end
+  stopf=stopf or stop
+  if stopf>50 then stopf=maxord end
+  if stopf==nil or startf==nil then return false,0 end
+  local rn=element..'CAVBN'
+  if stopf<=startf then return false end
+  local fstep= step or (stopf-startf)/50
+  if fstep<startf/20 then return false end
+  local th=threshold-20
+  local sm=svrtymult
+  local dsi=0
+  return z_broadbandnoise(element,brg,straxis,dsi,rn,startf,stopf,fstep,th,sm)
+end
+--
+function pvcavitationbroadbandnoise(element,brg,straxis,strrotorname,strtag,threshold,svrtymult) -- Pump cavitation BBN evaluates BBN at 1,2,3x pump vanes +/- 10%
+  threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult) 
+  local pvbbn=false
+  local pvbbnsev=0
+  -- 1X should be the only tag to return an order of 1, tagnot1x allows analysis to continue only if the tag order is not 1
+  local tagnot1x=true
+  local conf=0
+  if strtag~='1X' then 
+    local tago=get_tag_order( strtag, element, 1 )
+    tagnot1x = tago.order~=1 
+  end
+  if tagnot1x then
+    local th=threshold-20
+    local sm=svrtymult  
+    local bearing,alias,spdratio =z_get_brg_and_data_set_speed_ratio(element,brg)
+    local rn=element..'PVBN'
+    z_countuniquecalls(strtag,element,brg,straxis)
+    local _,dstart,_,dstop=maximum_data_range(element,brg,straxis)
+    local tago=get_tag_order( strtag, element,-1 )
+    if dstop==nil or dstart==nil or tago.order<1 or dstop<dstart or tago.order>dstop then return false,0 end
+    local pm=.1*tago.order*spdratio
+    local fstep= 2*pm/10
+    local startf,stopf
+    local dsi=0
+    for h=1,3,1 do
+      startf=h*tago.order*spdratio-pm
+      stopf=h*tago.order*spdratio+pm
+      if startf<dstop then
+        if stopf>dstop then stopf=dstop end
+        local pv,pvsev,pvconf=z_broadbandnoise(element,brg,straxis,dsi,rn,startf,stopf,fstep,th,sm)
+        if pv then
+          pvbbn=true
+          pvbbnsev=pvbbnsev+pvsev/h
+          conf=stanford_conf(conf,pvconf)
+        end
+      end
+    end
+  end
+  return pvbbn , pvbbnsev, conf
 end
 --
 function maximum_data_range(element,brg,straxis)
@@ -1701,6 +1780,7 @@ function maximum_data_range(element,brg,straxis)
 end
 
 function z_broadbandnoise(element,brg,straxis,dsi,strrotorname,start,stop,step,threshold,svrtymult) -- Broadband Noise evaluation function
+  threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
   --if true then return false end
   local rn=string.upper(strrotorname) or ''
   local noisetype="BBN"
@@ -1713,10 +1793,8 @@ function z_broadbandnoise(element,brg,straxis,dsi,strrotorname,start,stop,step,t
   local stopf=stop or 10
   local fstep= step or (stopf-startf)/20
   debugprint (startf.." - "..stopf.." order BB Noise evaluation started on "..rn.." Rotor",element,"bearing",brg,"axis",straxis)
-  increment_store_counter( "BBpts"..rn )
-  local bbthld=threshold or 90
-  local smult=svrtymult or 1
-  z_countuniquecalls(rn,'',brg,straxis) --('bbn',element,brg,straxis)
+  local bbthld=threshold-20
+  local smult=svrtymult
   local rF1x=analyze_by_tag( "1X", element, brg, straxis )
   increment_store_counter( "BBpt"..rn ) 
   local sr1x=rF1x.sfreq 
@@ -1742,6 +1820,8 @@ function z_broadbandnoise(element,brg,straxis,dsi,strrotorname,start,stop,step,t
   local sumaval=0
   local num=0
   local tsev=0
+  local conf=0
+  local steps=math.abs(stop-start)/step
   local check,count = get_store_value("BBsvrty"..rn )
   if check==false then count=0 end
   local sverity=0
@@ -1760,8 +1840,10 @@ function z_broadbandnoise(element,brg,straxis,dsi,strrotorname,start,stop,step,t
       -- no_error is false then get_avg_noise will assert out if there is no supporting data.
       local sdsi, s = get_avg_noise( i, i+fstep, brg, "normal", straxis, true ) 
       if s==nil then break end
-      local a = constantaccelspec(g_no_ave_non_ff_spec,(i+i+fstep)/2)
-
+      local adsi, a = get_avg_noise( i, i+fstep, brg, "average", straxis, true ) 
+      if a==nil then
+        a = constantaccelspec(g_no_ave_non_ff_spec,(i+i+fstep)/2)
+      end
       --return { ["sdsi"] = sdsi, ["sval"] = s, ["adsi"] = adsi, ["aval"] = a, ["dif"] = (s-a), ["pct"] = (s-a)/a }
       dsi=sdsi
       bbdif=s-a
@@ -1769,12 +1851,13 @@ function z_broadbandnoise(element,brg,straxis,dsi,strrotorname,start,stop,step,t
       bbaval=a
     end
 
-    if trouble_shoot then debugprint ( element, brg, straxis ,i,bbdif, bbval) end
+    if trouble_shoot then debugprint ( element, brg, straxis ,i,bbdif, bbsval) end
     if bbdif>3 and bbsval>63 then
       if firstfreq==0 then firstfreq=i end
       if bbdif>bbmaxdif then bbmaxdif=bbdif end
       sverity=z_amplitude_weighted_severity(bbdif,bbsval,bbthld)
       tsev=tsev+sverity
+      conf=stanford_conf(conf,1/steps/3)
       sumsval=sumsval+ bbsval  --ConvertSpectrum( Unit.U_VDB , g_internal_unit    , rFbb.sval )
       sumaval=sumaval+ bbaval  --ConvertSpectrum( Unit.U_VDB , g_internal_unit    , rFbb.aval )
       num=num+1
@@ -1801,16 +1884,20 @@ function z_broadbandnoise(element,brg,straxis,dsi,strrotorname,start,stop,step,t
     put_store_value("BBsvrty"..rn,count)
     debugprint (startf.." - "..stopf.." order BB Noise rule fired- Severity "..count.." on "..rn.." rotor near "..lastfreq.." orders.")
     assert2(1)
-    return true,tsev
+    assert3(conf)
+    return true,tsev,conf
   end
   debugprint (rn.." "..noisetype.." BB Noise FALSE")
-  return false,0
+  return false,0,0
 end
 function gearbroadbandnoiseseverity(element,strrotorname,startf,stopf) -- Gear BBN severity normalization
-
+  local factor=1
+  if  strrotorname=='COMPRESSOR' then  
+    factor=get_custom_parameter('gmsevmult') or 1
+  end
   local rn=strrotorname..'GBBN'..element
   local fired,svrty=z_broadbandnoiseseverity(rn,startf,stopf,element)
-  put_store_value("GMBBN",svrty)
+  put_store_value("GMBBN",svrty*factor)
   return fired
 end
 function rotorbroadbandnoiseMFseverity(strrotorname,startf,stopf) -- Middle Freq Broadband Noise normalization function default 3 to 10 orders
@@ -1823,6 +1910,16 @@ function rotorbroadbandnoiseHFseverity(strrotorname,startf,stopf) -- High Freq B
   local rn=strrotorname..'HF'
   return z_broadbandnoiseseverity(rn,startf,stopf)
 end
+function pumpcavitationbroadbandnoiseseverity(element,strrotorname,startf,stopf) -- High Freq Broadband Noise normalization function default 20 to 100 orders
+
+  local rn=strrotorname..'CAVBN'
+  return z_broadbandnoiseseverity(rn,startf,stopf)
+end
+function pvcavitationbroadbandnoiseseverity(element,strrotorname,startf,stopf) -- Pump Vane BBN severity normalization
+
+  local rn=strrotorname..'PVBN'
+  return z_broadbandnoiseseverity(rn,startf,stopf)
+end
 function bearingREbroadbandnoiseseverity(strrotorname,startf,stopf) -- High Freq Broadband Noise normalization function default 10 to 100 orders
 
   local rn=strrotorname..'REBN'
@@ -1832,23 +1929,13 @@ function z_broadbandnoiseseverity(strrotorname,start,stop,element) -- Broadband 
   local rn= strrotorname or ''
   element=element or ''
   debugprint ("Normalizing BB Noise severity fault on rotor "..rn)
-  local check2,points = get_store_value("BBpts"..rn )
-  --debugprint ("BBspts"..rn,check2,points)
   local check,count = get_store_value("BBpt"..rn )
-  --debugprint ("BBpt"..rn,check,count)
-  count=count or points
   --
   local check1,svrty = get_store_value("BBsvrty"..rn )
   debugprint ("BBsvrty"..rn,check2,check1,points,count,svrty)
-  local _, calls = get_store_value("calls"..rn) --element..'bbn')
-  local cls=pairscount(calls)
   svrty=svrty or 0
-  --debugprint ('BBpt',points,count,check)
   if check==true then
-    if count-points<0 then
-      svrty= svrty*(points/count)
-    end
-    svrty= svrty/cls
+    svrty= svrty/count
     if svrty>=0 then
       debugprint (rn.." BB Noise Issue Calculated Normalized Severity",count,svrty)
       assert2(svrty)
@@ -1865,12 +1952,11 @@ end
 function bearingcocked(element,brg,threshold,svrtymult) -- Cocked Bearing Check Function
   threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
   debugprint ("Cocked Bearing started on Rotor",element,"bearing",brg)
-  local balthld = threshold or 108
-  local smult = svrtymult or 1
+  local balthld = threshold
+  local smult = svrtymult
   local sverity=0
-  increment_store_counter( "ptsckdb" )
-  z_countuniquecalls('1X','bc',brg,'a')
-  local rFpma=z_get123orders( "1X", element, brg, "a" )
+  local conf=0
+  local rFpma=z_get123orders( "1X", element, brg, "a" ,true)
   increment_store_counter( "ptckdb" )
   if rFpma.found then 
     local dif1xa=rFpma.dif1x
@@ -1885,6 +1971,7 @@ function bearingcocked(element,brg,threshold,svrtymult) -- Cocked Bearing Check 
       if sval2xa>sval1xa and sval2xa>sval3xa then
         if dif2xa>g_fault_tone_threshold or (dif2xa>3 and sval2xa>g_significance_threshold) then 
           local x2sv=dif2xa 
+          conf=stanford_conf(conf,.4)
           if sval2xa>balthld then x2sv=x2sv+z_high_level_severity(sval2xa,balthld) end
           sverity=sverity+x2sv
           datami= z_fault_tone_list(element,brg,"a",rFpma.sord2x, sval2xa, sval2xa-dif2xa,x2sv,rFpma.dsi3x,rFpma.bin3x,"Cocked Bearing",'2x(1X)',rFpma.sfreq*2 ) 
@@ -1892,6 +1979,7 @@ function bearingcocked(element,brg,threshold,svrtymult) -- Cocked Bearing Check 
         end
         if dif1xa>g_fault_tone_threshold or ( dif1xa>3 and sval1xa>g_significance_threshold) then
           local x1sv=dif1xa 
+          conf=stanford_conf(conf,.1)
           if sval1xa>balthld then x1sv=x1sv+z_high_level_severity(sval1xa,balthld) end
           sverity=sverity+x1sv
           datami= z_fault_tone_list(element,brg,"a", rFpma.sord1x, sval1xa, sval1xa-dif1xa,x1sv,rFpma.dsi1x,rFpma.bin1x, "Cocked Bearing",'1x(1X)',rFpma.sfreq*1) 
@@ -1899,6 +1987,7 @@ function bearingcocked(element,brg,threshold,svrtymult) -- Cocked Bearing Check 
         end
         if dif3xa>g_fault_tone_threshold or ( dif3xa>3 and sval3xa>g_significance_threshold) then
           local x3sv=dif3xa 
+          conf=stanford_conf(conf,.1)
           if sval3xa>balthld then x3sv=x3sv+z_high_level_severity(sval3xa,balthld) end
           sverity=sverity+x3sv
           datami= z_fault_tone_list(element,brg,"a", rFpma.sord3x, sval3xa, sval3xa-dif3xa,x3sv,rFpma.dsi3x,rFpma.bin3x, "Cocked Bearing",'3x(1X)',rFpma.sfreq*3) 
@@ -1915,6 +2004,7 @@ function bearingcocked(element,brg,threshold,svrtymult) -- Cocked Bearing Check 
         put_store_value("ckdsvrty",count)
         debugprint ("Cocked Bearing rule fired - Severity",count,"CCCCCCCCCCCCCCCCC")
         assert2(count)
+        assert3(conf)
         return true
       end
     end
@@ -1927,18 +2017,11 @@ end
 --
 function bearingcockedseverity () -- Cocked Bearing severity Function
   debugprint ("Cocked Bearing normalize started")
-  local _, calls = get_store_value("calls"..'bc'..'1X')
-  local cls=pairscount(calls)
   local check,count = get_store_value("ptckdb")
-  local check2,pts = get_store_value("ptsckdb")
-  count=count or pts
   local check1,svrty = get_store_value("ckdsvrty")
   svrty=svrty or 0
   if check==true then
-    if count-pts<0 then
-      svrty= svrty*(pts/count)
-    end
-    svrty= svrty/cls
+    svrty= svrty/count
     if svrty>=0 then
       debugprint ("-- Calculate Normalized Severity --",count,svrty,"Cocked Bearing CCCCCCCCCCCCCCCCCCCCCC")
       assert2(svrty)
@@ -1975,13 +2058,10 @@ function z_subharmonics(strtag,element,brg,straxis,suborder,howmany,strrotorname
   if #shinfo~=0 then firstorder=shinfo[1].ord end
   table.insert(shinfo,{brg=brg,axial=straxis,ord=suborder})
   put_store_value("shinfo"..tag..element..rn,shinfo)
-  if firstorder==suborder then
-    increment_store_counter( "shpts"..tag..element..rn )
-  end
-  z_countuniquecalls(strtag,'sh',brg,straxis)
   local rF1x=analyze_by_tag( "1X", element, brg, straxis )
   local ordr1x=rF1x.sord
-  local sr1x=rF1x.sfreq 
+  local sr1x=rF1x.sfreq
+  local conf=0
   if sr1x==nil then
     for i,ds in ipairs (machine.datasets)  do
       if ds.dom=='spec' and ds.typ=='normal' and ds.axis==straxis and ds.mi==alias then
@@ -1990,9 +2070,18 @@ function z_subharmonics(strtag,element,brg,straxis,suborder,howmany,strrotorname
       end
     end 
   end
+  local sdsi=0
+  if rF1x.found==false then
+    if machine.elements[alias]~=nil and machine.elements[alias].data~=nil and machine.elements[alias].data.spec~=nil and machine.elements[alias].data.spec.normal[straxis]~=nil and machine.elements[alias].data.spec.normal[straxis][1]~=nil then
+      sdsi=machine.elements[alias].data.spec.normal[straxis][1]
+    end
+  else
+    sdsi=rF1x.sdsi
+  end
+  local bw=machine.datasets[sdsi].bw/sr1x or .01
   local hm=howmany or 5
-  local ffthld=threshold or 90
-  local smult=svrtymult or 1
+  local ffthld=threshold-20
+  local smult=svrtymult
   local sverity=0
   tag=string.upper(tag)  
   local lf=string.match(tag,'LF')=='LF'
@@ -2037,7 +2126,7 @@ function z_subharmonics(strtag,element,brg,straxis,suborder,howmany,strrotorname
       if not (iisint) then -- is i not an integer
         targetorder=i*tagord
         --debugprint (order,i,tagord)
-        if  math.abs(math.fmod (targetorder,tagord)-1)  > 0.1 then  --  ~= order % tagord
+        if  math.abs(math.fmod (targetorder,tagord)-1)  > 0.1 and targetorder>5*bw then  --  ~= order % tagord or >5 x BW
           rFsbt=analyze_by_order( targetorder, brg, straxis,true,true,true  )
           if rFsbt~=nil then
             if rFsbt.found and rFsbt.dif~=nil then 
@@ -2049,7 +2138,7 @@ function z_subharmonics(strtag,element,brg,straxis,suborder,howmany,strrotorname
                 shval=rFsbt.sval
                 local sbsverity=0
                 if shdif>g_fault_tone_threshold or ( shdif>3 and shval>g_significance_threshold) then 
-                  sbsverity=z_amplitude_weighted_severity(shdif,shval,108)
+                  sbsverity=z_amplitude_weighted_severity(shdif,shval,109)
                   --if shval>ffthld then sbsverity=sbsverity+z_high_level_severity(shval,ffthld) end 
                 end
                 -- list of potential subharmonics
@@ -2074,12 +2163,12 @@ function z_subharmonics(strtag,element,brg,straxis,suborder,howmany,strrotorname
               numharm=numharm+1
             end
           else
-            if round(s2.ord,2)==round(s1.ord+suborder,2) then  -- Check for higher order sidebands 
+            if round(s2.ord,2)==round(s1.ord+suborder*tagord,2) then  -- Check for higher order sidebands 
               adjharm=true
               numharm=numharm+1
             end
           end
-          if round(s2.ord,2)==round(s1.ord+tagord+suborder,2) or round(s2.ord,2)==round(s1.ord+suborder+2*tagord,2) or round(s2.ord,2)==round(s1.ord+suborder+3*tagord,2) or round(s2.ord,2)==round(s1.ord+suborder+4*tagord,2)then  -- check for neihboring subharmonics
+          if round(s2.ord,2)==round(s1.ord+tagord+suborder*tagord,2) or round(s2.ord,2)==round(s1.ord+suborder+2*tagord*tagord,2) or round(s2.ord,2)==round(s1.ord+suborder+3*tagord*tagord,2) or round(s2.ord,2)==round(s1.ord+suborder+4*tagord*tagord,2)then  -- check for neihboring subharmonics
             adjsb=true
             numsb=numsb+1
           end
@@ -2091,15 +2180,16 @@ function z_subharmonics(strtag,element,brg,straxis,suborder,howmany,strrotorname
         for _,sh in ipairs (sublist) do 
           if sh.sev>1 then
             sverity=sverity+sh.sev
+            conf=stanford_conf(conf,.01)
             local datami
             if strrule == nil then
-              datami= z_fault_tone_list(element,brg,straxis, sh.sord, sh.sval, sh.sval-sh.dif,sh.sev,sh.sdsi ,sh.sbin, sh.ord.."x("..strtag..") Subharmonic on "..rn,sh.ord.."x("..strtag..')',sh.sfreq) 
+              datami= z_fault_tone_list(element,brg,straxis, sh.sord, sh.sval, sh.sval-sh.dif,sh.sev,sh.sdsi ,sh.sbin, round(sh.ord/tagord,3).."x("..strtag..") Subharmonic on "..rn,round(sh.ord/tagord,3).."x("..strtag..')',sh.sfreq) 
               z_flag_tone_as_found (element,brg,straxis, sh.sfreq ,datami)
             else
-              datami=  z_fault_tone_list(element,brg,straxis, sh.sord, sh.sval, sh.sval-sh.dif,sh.sev,sh.sdsi ,sh.sbin, sh.ord.."x("..strtag..') '..strrule..' on '..rn,sh.ord.."x("..strtag..')', sh.sfreq)
+              datami=  z_fault_tone_list(element,brg,straxis, sh.sord, sh.sval, sh.sval-sh.dif,sh.sev,sh.sdsi ,sh.sbin, round(sh.ord/tagord,3).."x("..strtag..') '..strrule..' on '..rn,round(sh.ord/tagord,3).."x("..strtag..')', sh.sfreq)
               z_flag_tone_as_found (element,brg,straxis, sh.sfreq ,datami)
             end
-            debugprint (rn,sh.ord.." subharmonic of "..tag.." found at",sh.sord," orders",sh.dif,sh.sev)
+            debugprint (rn,round(sh.ord/tagord,3).." subharmonic of "..tag.." found at",sh.sord," orders",sh.dif,sh.sev)
           end
         end
       end
@@ -2117,6 +2207,7 @@ function z_subharmonics(strtag,element,brg,straxis,suborder,howmany,strrotorname
         --put_store_value("shsvrty"..tag..element..rn,count)
         debugprint (rn,suborder,"subharmonic of", tag,"fired - Severity",count)
         assert2(count)
+        assert3(conf)
         return true, sverity
       end
     end
@@ -2132,18 +2223,11 @@ function z_subharmonicseverity (strtag,element,strrotorname) -- Subharmonic seve
   debugprint ("subharmonic severity normalize started")
   local t=strtag or "1X"
   local rn= strrotorname or ''
-  local _, calls = get_store_value("calls"..'sh'..t)
-  local cls=pairscount(calls)
   local check,count = get_store_value("shpt"..t..element..rn)
-  local check2,points = get_store_value("shpts"..t..element..rn)
   local check1,svrty = get_store_value("shsvrty"..t..element..rn)
-  count=count or points
   svrty=svrty or 0
   if check1==true then
-    if count-points<0 then
-      svrty= svrty*(points/count)
-    end
-    svrty= svrty/cls
+    svrty= svrty/count
     if svrty >= 1 then
       debugprint ("-- Calculate Normalized Severity --",count,svrty,"Subharmonics SHSHSHSHSHSHSHSH")
       assert2(svrty)
@@ -2159,12 +2243,14 @@ function bearingloosnessseverity(strtag,element,strrotorname)
 end
 
 function z_get_rule_tune_info(element,threshold,svrtymult)
-  local thrshld=tonumber(get_attribute_value("FAULT_THRESHOLD",element, 108)) -- or threshold
-  local svrtymlt=tonumber(get_attribute_value("FAULT_SVRTYMULT",element, 1)) -- or svrtymult
+  threshold=threshold or 109
+  svrtymult=svrtymult or 1
+  local thrshld=tonumber(get_attribute_value("FLT_TH",element, threshold)) 
+  local svrtymlt=tonumber(get_attribute_value("FLT_SM",element, svrtymult)) 
   return thrshld,svrtymlt
 end
 --
-function rotor_rub(strtag,element,brg,straxis,suborder,howmany,strrotorname,threshold,svrtymult)  -- Looks for 1/3, 1/4, 1/5 shaft rate subharmonics
+function rotor_rub(element,brg,straxis,suborder,howmany,strrotorname,threshold,svrtymult)  -- Looks for 1/3, 1/4, 1/5 shaft rate subharmonics
   threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
   --local harmonics=z_forcingfrequencyharmonics("1X",element,brg,straxis,howmany,strrotorname,threshold,svrtymult)
   local hm=howmany or 8
@@ -2174,13 +2260,13 @@ function rotor_rub(strtag,element,brg,straxis,suborder,howmany,strrotorname,thre
   return fifthsubharmonics or quartersubharmonics or thirdsubharminics
 end
 --
-function rotor_rubseverity(strtag,element,strrotorname)  -- Normalizes the severity of 1/3, 1/4, 1/5 shaft rate subharmonics
+function rotor_rubseverity(element,strrotorname)  -- Normalizes the severity of 1/3, 1/4, 1/5 shaft rate subharmonics
   --local harm,harmseverity= z_forcingfrequencyseverity("1X",element,strrotorname)
   local subharm,subharmseverity= z_subharmonicseverity ("1X",element,strrotorname)
   --harmseverity=harmseverity or 0
   subharmseverity=subharmseverity or 0
   if subharm then 
-    assert2(subharmseverity)
+    assert2(subharmseverity*3) -- times 3 for scaling
     return  subharm 
   end
   return false
@@ -2231,9 +2317,10 @@ function z_get123harmonicsidebands(strtag,element,brg,straxis,strsbtag,howmany,s
     end
   end
   local hm=howmany or 4
-  local ffthld=threshold or 108
+  local ffthld=threshold or 109
   local smult=svrtymult or 1
   local harms={}
+  local conf=0
   local _,_,_,maxdata=maximum_data_range(element,brg,straxis)
   for _,ax in ipairs (axis) do
     local r1x=analyze_by_tag( '1X', element, brg, ax )
@@ -2291,55 +2378,50 @@ function z_get123harmonicsidebands(strtag,element,brg,straxis,strsbtag,howmany,s
                 tdif=center.dif
                 energy=ConvertSpectrum( Unit.U_VDB , g_internal_unit    , cntrsval )
                 if tdif>g_fault_tone_threshold or ( tdif>3 and cntrsval>g_significance_threshold) then
-                  sverty=sverty+z_amplitude_weighted_severity(tdif,center.sval,108)
-                end
-                if cntrsval >ffthld then
-                  --sverty=sverty+z_high_level_severity(center.sval-ffthld)
+                  sverty=sverty+z_amplitude_weighted_severity(tdif,center.sval,109)
+                  conf=stanford_conf(conf,.1)
                 end
               end
             end 
           end
-        end
-        sidebandinfo={}
-        for sbside=-1,1,2 do
-          local ii
-          for i=1,hm,1 do
-            ii=i
-            sbsvrty=0
-            sbdif=i*ordrsbt
-            if cntrord~=0 then
-              sbford=cntrord+(sbside*sbdif)
-            else
-              sbford=harm*fundord+(sbside*sbdif)
-            end
-            if sbford>1 and sbford<maxdata*.99 then
-              sb= analyze_by_order(sbford,brg,ax,true,true,true )
-
-              if sb==nil then
-                local _
+          --end
+          sidebandinfo={}
+          for sbside=-1,1,2 do
+            local ii
+            for i=1,hm,1 do
+              ii=i
+              sbsvrty=0
+              sbdif=i*ordrsbt
+              if cntrord~=0 then
+                sbford=cntrord+(sbside*sbdif)
               else
-                if sb.found then
-                  if sb.dif~=nil then
-                    local isasb,_,frac=z_is_a_multiple(sbford,sb.sord,.0015) --math.modf(math.abs(sbford-sb.sord))
-                    if isasb --[[frac<.02 or 1-frac<.02]] then
-                      tdif=tdif+sb.dif
-                      energy=energy+ConvertSpectrum( Unit.U_VDB , g_internal_unit    , sb.sval )
-                      if sb.sval>sbmax then sbmax=sb.sval end
-                      if sb.dif>g_fault_tone_threshold or ( sb.dif>3 and sb.sval>g_significance_threshold)  then 
-                        sverty=sverty+z_amplitude_weighted_severity(sb.dif,sb.sval,108)
-                        sbsvrty=sbsvrty+z_amplitude_weighted_severity(sb.dif,sb.sval,108)
-                      end
-                      local thldoffset=20*math.log(harm,10) 
-                      if sb.sval >ffthld-thldoffset then
-                        --sverty=sverty+z_high_level_severity(sb.sval,(ffthld-thldoffset))
-                        --sbsvrty=sbsvrty+z_high_level_severity(sb.sval,(ffthld-thldoffset))
-                      end
-                      sb.severity=sbsvrty 
-                      table.insert(sidebandinfo,sb)
-                    end
-                  end
+                sbford=harm*fundord+(sbside*sbdif)
+              end
+              if sbford>1 and sbford<maxdata*.99 then
+                sb= analyze_by_order(sbford,brg,ax,true,true,true )
+                if sb==nil then
+                  local _
                 else
+                  if sb.found then
+                    if sb.dif~=nil then
+                      local isasb,_,frac=z_is_a_multiple(sbford,sb.sord,.0015) --math.modf(math.abs(sbford-sb.sord))
+                      if isasb --[[frac<.02 or 1-frac<.02]] then
+                        tdif=tdif+sb.dif
+                        energy=energy+ConvertSpectrum( Unit.U_VDB , g_internal_unit    , sb.sval )
+                        if sb.sval>sbmax then sbmax=sb.sval end
+                        if sb.dif>g_fault_tone_threshold or ( sb.dif>3 and sb.sval>g_significance_threshold)  then 
+                          sverty=sverty+z_amplitude_weighted_severity(sb.dif,sb.sval,109)
+                          sbsvrty=sbsvrty+z_amplitude_weighted_severity(sb.dif,sb.sval,109)
+                          conf=stanford_conf(conf,1/(2*hm+1)/3)
+                        end
+                        local thldoffset=20*math.log(harm,10) 
+                        sb.severity=sbsvrty 
+                        table.insert(sidebandinfo,sb)
+                      end
+                    end
+                    --else
 
+                  end
                 end
               end
             end
@@ -2361,9 +2443,9 @@ function z_get123harmonicsidebands(strtag,element,brg,straxis,strsbtag,howmany,s
           else
             center.energyratio=0
             center.sidebands={}
-            center.tdif=-9999
-            center.sbmax=-9999
-            center.dif=-9999
+            center.tdif=nil -- -9999 -- dy 2/11/2020 fixed so gear analysis worka correctly
+            center.sbmax=nil -- -9999 -- dy 2/11/2020 fixed so gear analysis worka correctly
+            center.dif=nil -- -9999 -- dy 2/11/2020 fixed so gear analysis worka correctly
             centertoneinfo[harm]=center
           end
         end
@@ -2395,19 +2477,20 @@ function z_get123harmonicsidebands(strtag,element,brg,straxis,strsbtag,howmany,s
         --table.insert(energyratio,math.max(ax.info[i].energyratio,ax.info[i-1].energyratio))
         --end
       else
-        table.insert(tdif,-9999)
+        table.insert(tdif,nil) -- -9999) -- dy 2/11/2020 fixed so gear analysis worka correctly
         table.insert(energy, 0)
         table.insert(sverty,0)
-        table.insert(dif,-9999)
+        table.insert(dif,nil) -- -9999)- dy 2/11/2020 fixed so gear analysis worka correctly
         table.insert(energyratio,0)
       end
     end
-    return {['found']=true, ['harmonics']=harms, ['tdif']=tdif, ['energy']=energy, ['severity']=sverty, ['dif']=dif,['energyratio']=energyratio}
+    return {['found']=true, ['harmonics']=harms, ['tdif']=tdif, ['energy']=energy, ['severity']=sverty, ['dif']=dif,['energyratio']=energyratio}, conf
   end
   return {["found"]=false}
 end
 
 function gear_analysis(strfault,strtag,element,brg,straxis,strsbtag,howmany,strrotorname,threshold,svrtymult)  -- This function analyzes for strfault = 'TOOTH LOAD 'or'GEAR ALIGNMENT' or 'ECCENTIC GEAR' or 'GEAR WEAR' or 'GEAR BACKLASH' gear faults by analyzing gear mesh harmonic patterns if available.
+  threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
   local faults={'TOOTH LOAD','GEAR ALIGNMENT','ECCENTIC GEAR','GEAR WEAR','GEAR BACKLASH'}
   strfault=strfault or ""
   if strfault=='' then return false end
@@ -2422,8 +2505,8 @@ function gear_analysis(strfault,strtag,element,brg,straxis,strsbtag,howmany,strr
   local rn= strrotorname or ''
   local sbt=strsbtag or "1X"
   local hm=howmany or 4
-  local ffthld=threshold or 108
-  local smult=svrtymult or 1
+  local ffthld=threshold
+  local smult=svrtymult
   local sverity=0
   straxis=straxis or "r"
   local shaft=analyze_by_tag( "1X", element, brg, straxis )
@@ -2434,7 +2517,7 @@ function gear_analysis(strfault,strtag,element,brg,straxis,strsbtag,howmany,strr
     sval1X=shaft.sval
     dif1x=shaft.dif
   end
-  local gt= z_get123harmonicsidebands(strtag,element,brg,straxis,sbt,howmany,strrotorname,threshold,svrtymult)
+  local gt, conf= z_get123harmonicsidebands(strtag,element,brg,straxis,sbt,howmany,strrotorname,threshold,svrtymult)
   local tsev=0
   if gt.found then
 
@@ -2447,25 +2530,30 @@ function gear_analysis(strfault,strtag,element,brg,straxis,strsbtag,howmany,strr
     if  gt.dif[1]>gt.dif[2] and gt.dif[1]>gt.dif[3] and gt.energyratio[1]>.3 and gt.dif[1]>0 and findx==1  then -- TOOTH LOAD
       z_fault_tone_list(element,brg,straxis, t[1].sord, t[1].sval, t[1].aval,tsev ,t[1].sbin,t[1].sdsi, "Tooth Loading",'TTH LD', t[1].sfreq )
       assert2(tsev)
+      assert3(conf)
       return true 
     end 
     if  gt.dif[2]>0 and gt.energy[2]>2*gt.energy[1] and gt.energy[2]>2*gt.energy[3]and gt.tdif[2]>gt.tdif[1] and gt.tdif[2]>gt.tdif[3] and findx==2 then -- GEAR ALIGNMENT
       z_fault_tone_list(element,brg,straxis, t[2].sord, t[2].sval, t[2].aval,tsev ,t[2].sbin,t[2].sdsi, "Gear Alignment",'GR ALGNMT', t[2].sfreq )
       assert2(tsev)
+      assert3(conf)
       return true 
     end 
     if gt.energy[1]>2*gt.energy[2] and gt.energy[3]>2*gt.energy[2] and (gt.severity[1]>0 or gt.severity[3]>0) then 
       if gt.tdif[1]-gt.dif[1]>gt.dif[1]  and (gt.dif[1]>0 or gt.tdif[1]-gt.dif[1]>0) and dif1x>0 and findx==3 then  -- ECCENTIC GEAR
         z_fault_tone_list(element,brg,straxis, t[1].sord, t[1].sval, t[1].aval,tsev ,t[1].sbin,t[1].sdsi, "Eccentric Gear",'ECCTRC GR', t[1].sfreq )
         assert2(tsev)
+        assert3(conf)
         return true
       else if gt.tdif[1]-gt.dif[1]>gt.dif[1]  and (gt.tdif[3]>gt.tdif[1] or gt.tdif[2]>gt.tdif[1] ) and findx==4 then -- GEAR WEAR
         z_fault_tone_list(element,brg,straxis, t[2].sord, t[2].sval, t[2].aval,tsev ,t[2].sbin,t[2].sdsi, "Gear Wear",'GR WR', t[2].freq )
         assert2(tsev)
+        assert3(conf)
         return true
       else -- GEAR BACKLASH
         z_fault_tone_list(element,brg,straxis, t[1].sord, t[1].sval, t[1].aval,tsev ,t[1].sbin,t[1].sdsi, "Gear Backlash",'GR BKLSH', t[1].sfreq )
         assert2(tsev)
+        assert3(conf)
         return true
       end
     end
@@ -2482,10 +2570,9 @@ function bearingoilwhirl(element,brg,straxis,strrotorname,threshold,svrtymult) -
   threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
   local rn=strrotorname or ''
   debugprint ("Oil whirl evaluation started on "..rn.." Rotor",element,"bearing",brg,"axis",straxis)
-  increment_store_counter( "OWpts"..rn )
-  local OWthld=threshold  or 90
-  local smult=svrtymult or 1
-  z_countuniquecalls('OW','',brg,straxis)
+  local OWthld=threshold-20
+  local smult=svrtymult
+  local conf=0
   local rF1x=analyze_by_tag( "1X", element, brg, straxis )
   if rF1x.found then
     increment_store_counter( "OWpt"..rn ) 
@@ -2566,7 +2653,7 @@ function bearingoilwhirl(element,brg,straxis,strrotorname,threshold,svrtymult) -
     if not (othershaft) then
       if lastdif > g_fault_tone_threshold or (lastdif >3 and lastsval>g_significance_threshold) then 
         local owsverity=z_amplitude_weighted_severity(lastdif,lastsval,OWthld)
-        --if lastsval >OWthld then owsverity=owsverity+z_high_level_severity(lastsval,OWthld) end
+        conf=stanford_conf(conf,.4)
         if lastsval>sval1x then owsverity=owsverity+(lastsval-sval1x) end
         sverity=sverity+owsverity
         z_fault_tone_list(element,brg,straxis, lastord, lastsval, lastsval-lastdif,owsverity ,rFOW.sbin,lastbin, "Bearing Oil Whirl",'Oil Whirl', lastord/spdratio*sr1x ) 
@@ -2580,6 +2667,7 @@ function bearingoilwhirl(element,brg,straxis,strrotorname,threshold,svrtymult) -
         put_store_value("OWsvrty"..rn,count+sverity)
         debugprint ("Oil whirl rule fired- Severity "..count+sverity.." on "..rn.." rotor")
         assert2(1)
+        assert3(conf)
         return true
       end
     end  --if not (othershaft)
@@ -2587,30 +2675,18 @@ function bearingoilwhirl(element,brg,straxis,strrotorname,threshold,svrtymult) -
   else
     debugprint (rn.." oil whirl failed due to no 1X found")
   end
-
   return false
 end
 --
 function bearingoilwhirlseverity(strrotorname)-- Oil whirl normalization function
   local rn=strrotorname or ''
   debugprint ("Normalizing LF Oil whirl severity fault on rotor "..rn)
-  local check2,points = get_store_value("OWpts"..rn)
-  --debugprint ("OWpts"..rn,check2,points)
   local check,count = get_store_value("OWpt"..rn)
-  --debugprint ("OWpt"..rn,check,count)
-  count=count or points
   --
   local check1,svrty = get_store_value("OWsvrty"..rn)
-  --debugprint ("OWsvrty"..rn,check1,svrty)
   svrty=svrty or 0
-  local _, calls = get_store_value("calls"..''..'OW')
-  local cls=pairscount(calls)
-  --debugprint ('OW',points,count,svrty)
   if check==true then
-    if count-points<0 then
-      svrty= svrty*(points/count)
-    end
-    svrty= svrty/cls
+    svrty= svrty/count
     if svrty>=0 then
       debugprint ("Oil whirl Issue Calculated Normalized Severity",count,svrty)
       assert2(svrty)
@@ -2863,7 +2939,7 @@ end --]]
 function data_check_missing_data(element,brg,straxis) -- Checks for the presents of normal spectrum data, true is no data
   local bearing,alias,spdratio =z_get_brg_and_data_set_speed_ratio(element,brg)
   if bearing==alias then
-    local ssmin,ssmax,low,high=maximum_data_range(element,brg,straxis)if ssmin==nil and ssmax==nil and low==nil and high==nil and not isparentrule then
+    local ssmin,ssmax,low,high=maximum_data_range(element,brg,straxis)if ssmin==nil and ssmax==nil and low==nil and high==nil then
       debugprint ("No Spectral Data for pickup "..bearing.. " axis "..straxis)
       z_fault_tone_list(element,brg,straxis, 1, 0, 0,0,nil,nil, "No Data ",'NoDATA',101,nil) 
       assert2(101)
@@ -2944,7 +3020,7 @@ function data_check_high_noise_level(element, brg, straxis) -- Checks for abnorm
         elseif lstart<.3 then
           lstart=.3
         end 
-        local lowavedata=analyze_noise_floor (lstart,lstop,brg,straxis)
+        local lowavedata=analyze_noise_floor (lstart,lstop,brg,straxis,true)
         if lowavedata~=nil then
           if math.abs(lowavedata.dif)>20  then
             debugprint ('Data Noise Floor signicantly higher than Average at bearing '.. brg .. " axis "..straxis)
@@ -2999,7 +3075,7 @@ function data_check_low_noise_level(element, brg, straxis) -- Checks for abnorma
           local _
         end
         if lstart<1 and stopf>25 then lstart=1 end 
-        local lowavedata=analyze_noise_floor (lstart,stopf,brg,straxis)
+        local lowavedata=analyze_noise_floor (lstart,stopf,brg,straxis,true)
         if lowavedata~=nil then 
           if math.abs(lowavedata.dif)>20  then
             debugprint ('Data Noise Floor signicantly lower than Average at bearing '.. brg .. " axis "..straxis)
@@ -3068,8 +3144,8 @@ function data_check(element, brg, straxis) -- Checks for the data at bearings
         end
       end
     else
-      local lowavedata=analyze_noise_floor (.5,stopf,brg,straxis)
-      if math.abs(lowavedata.dif)>20  then
+      local lowavedata=analyze_noise_floor (.5,stopf,brg,straxis,true)
+      if lowavedata.dif~=nil and math.abs(lowavedata.dif)>20  then
         debugprint ('Data Noise Floor signicantly different than Average at bearing '.. brg .. " axis "..straxis)
         z_fault_tone_list(element,brg,straxis, 2, lowavedata.sval, lowavedata.aval,lowavedata.dif,nil,nil, "Possible Bad Data ",'BD',5 ,10)       
         assert2(math.abs(lowavedata.dif))
@@ -3297,7 +3373,7 @@ function bearingREtones_parent_severity()
   local noise,noisesvrty = get_store_value("REBN")
   local svrty=0
   if tones then svrty=tonesvrty end
-  if noise then svrty=svrty+.5*noisesvrty end
+  if noise then svrty=svrty+1*noisesvrty end
   if svrty>0 then
     debugprint('Non-sychronous bearing tone and noise parent rule severity TRUE')
     assert2(svrty)
@@ -3312,12 +3388,12 @@ end
 
 
 function bearingREtones(element,brg,straxis,strrotorname,threshold,svrtymult) -- Checks for non-sychronous tones with significant harmonics or sidebands
+  threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
   local rn=strrotorname or ''
   debugprint (rn.." Non-sychronous bearing tone rule started on "..rn.." Rotor",element,"bearing",brg,"axis",straxis)
-  increment_store_counter( "pts"..element..rn.."brgretones" )
   threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
-  local thld = threshold or 108
-  local smult = svrtymult or 1
+  local thld = threshold
+  local smult = svrtymult
   local sverity=0
   local te=0
   local tc=0
@@ -3334,9 +3410,9 @@ function bearingREtones(element,brg,straxis,strrotorname,threshold,svrtymult) --
   end ]]
 
   --debugprint (get_attribute_value("THRESHOLD",element),"<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
-  z_countuniquecalls('bret',element,brg,straxis)
   local rF1x=analyze_by_tag( "1X", element, brg, straxis )
   increment_store_counter( "pt"..element..rn.."brgretones" )
+  local conf=0
   local ordr1x=rF1x.sord
   local sr1x=rF1x.sfreq 
   local bearing,alias,spdratio =z_get_brg_and_data_set_speed_ratio(element,brg)
@@ -3393,7 +3469,7 @@ function bearingREtones(element,brg,straxis,strrotorname,threshold,svrtymult) --
         local f1x=harms.harmonics[idx].harm_sfreq
         local maxdif=0
         local maxsval=0
-        if h1x > 2 and #harms.harmonics[idx].harmonic_info>1 then  -- typically bearing tone fundimentals are greater than 2x so only look there
+        if h1x > 1.5 and #harms.harmonics[idx].harmonic_info>1 then  -- typically bearing tone fundimentals are greater than 1.5x so only look there
           for _,harm in ipairs (harms.harmonics[idx].harmonic_info)  do
             if harm.dif~=nil then
               --dup=z_tone_in_fault_tone_list(element,brg,straxis, harm.sord, harm.sval, harm.aval,hsverity,harm.sbin, hord.."x harmonic of "..tostring(round(h1x,3)).. 'x on '..rn,hord.."h"..tostring(round(h1x,3))..'x', harm.sfreq) 
@@ -3416,12 +3492,14 @@ function bearingREtones(element,brg,straxis,strrotorname,threshold,svrtymult) --
                     tc=tc+1
                     te=te+10^(harm.sval/20)
                     hgsverity=hgsverity+hsverity
+                    conf=stanford_conf(conf,.1)
                     local hord=nopointzero(tostring(round(harm.sord/h1x)))
                     --dup=z_tone_in_fault_tone_list(element,brg,straxis, harm.sord, harm.sval, harm.aval,hsverity,harm.sbin, hord.."x harmonic of "..tostring(round(h1x,3)).. 'x on '..rn,hord.."h"..tostring(round(h1x,3))..'x', harm.sfreq)
                     --if not(dup) then 
                     if hstring~="" then hstring=hstring..',' end
                     hstring=hstring..hord
                     z_fault_tone_list(element,brg,straxis, harm.sord, harm.sval, harm.aval,hsverity,harm.sdsi,harm.sbin, hord.."x harmonic of "..tostring(round(h1x,3)).. 'x on '..rn,hord.."h"..tostring(round(h1x,3))..'x', harm.sfreq) 
+                    --z_flag_tone_as_found (element,brg,straxis,harm.sfreq,mi,rulefire) -- dy 1/29/2020 removed to ensure the other/alieced bearing has the same result.
                   end
                   --end -- if not(dup)
                 end -- if not (used)
@@ -3503,6 +3581,7 @@ function bearingREtones(element,brg,straxis,strrotorname,threshold,svrtymult) --
                       tc=tc+1
                       te=te+10^(side.sval/20)
                       sbgsverity=sbgsverity+sbsverity
+                      conf=stanford_conf(conf,.1)
                       local sord=nopointzero( tostring(round((side.sord-firstsb)/s1x)))
                       --dup=z_tone_in_fault_tone_list(element,brg,straxis, side.sord, side.sval, side.aval,sbsverity,side.sbin, sord.."x("..speedmatch..") sideband of "..tostring(round(firstsb,3)).. 'x on '..rn,sord..'x('..speedmatch..")sb"..tostring(round(firstsb,3))..'x', side.sfreq) 
                       --if not(dup) then 
@@ -3551,6 +3630,7 @@ function bearingREtones(element,brg,straxis,strrotorname,threshold,svrtymult) --
                 tc=tc+1
                 te=te+10^(tone.sval/20)
                 sverity=sverity+tsverity
+                conf=stanford_conf(conf,.08)
                 local sord=tostring(round((tone.sord)/s1x,3))
                 z_fault_tone_list(element,brg,straxis, tone.sord, tone.sval, tone.aval,tsverity,tone.sdsi,tone.sbin, sord.."x non-synchronous tone on "..rn,sord..'x brg', tone.sfreq) 
               end
@@ -3573,6 +3653,7 @@ function bearingREtones(element,brg,straxis,strrotorname,threshold,svrtymult) --
       put_store_value("svrty"..element..rn.."brgretones",count)
       debugprint (rn.." Bearing RE non-sychronous tones fired - Severity",count,sverity)
       assert2(1)
+      assert3(conf)
       return true
     end  -- if sverity~=0
   end --if sides.found or harms.found
@@ -3585,23 +3666,17 @@ end  -- function bearingREtones
 function bearingREtonesseverity(element,strrotorname) -- Calculate nonsychronous bearing tone Normalized Severity
   local rn=strrotorname or ''
   debugprint ("Normalizing Bearing RE non-sychronous tones fault severity on element "..element.." on rotor "..rn)
-  local check2,points = get_store_value("pts"..element..rn.."brgretones")
-  --debugprint ("pts"..element..strtag,check2,points)
+
   local check,count = get_store_value("pt"..element..rn.."brgretones")
   --debugprint ("pt"..element..strtag,check,count)
-  count=count or points
-  local _, calls = get_store_value("calls"..element..'bret')
-  local cls=pairscount(calls)
+
   local check1,svrty = get_store_value("svrty"..element..rn.."brgretones")
   --debugprint ("svrty"..element..strtag,check1,svrty)
   svrty=svrty or 0
 
   --debugprint (strtag,points,count,svrty)
   if check==true then
-    if count-points<0 then
-      svrty= svrty*(points/count)
-    end
-    svrty= svrty/cls
+    svrty= svrty/count
     local fault=''
     if svrty>=0 then
       debugprint (rn.." Bearing RE non-sychronous tones Fault Calculated Normalized Severity",count,svrty,fault)
@@ -3655,23 +3730,23 @@ function z_peak_is_2XLF_mult(pk_freq,sr1x)
   end
 end
 --
-function z_amplitude_weighted_severity(dif,sval,threshold)
+function z_amplitude_weighted_severity(dif,sval,threshold) -- severity doubles or halves every 12 DB above of below threshold
   if dif==nil then return 0 end
-  threshold=threshold or 110
+  threshold=threshold or 109
   local severity=0
-  if sval ~= nil then
-    if sval>50 and sval<=110 and dif>0 then --110 VdB threshold is GSO spec which is really close to mil-std-167 and.1 in/sec industrial rule of thumb  
-      severity=(dif)*(10^(sval/40)/10^(threshold/40)) -- severity decreases 50% every 12 dB below 110 VdB 
-    elseif sval>110 and dif>0 then
-      severity=(dif)*(10^(sval/40)/10^(threshold/40)) -- severity doubles per 6 dB above 110 VdB
-    end 
+  if sval ~= nil and dif>0 then
+    --if sval>50 and sval<=110 then --110 VdB threshold is GSO spec which is really close to mil-std-167 and.1 in/sec industrial rule of thumb  
+    severity=(dif)*(10^(sval/40)/10^(threshold/40)) -- severity decreases 50% every 12 dB below 110 VdB 
+    -- elseif sval>110then
+    -- severity=(dif)*(10^(sval/40)/10^(threshold/40)) -- severity doubles per 6 dB above 110 VdB
+    --end 
   end
   return severity
 end
 --
 function z_high_level_severity(sval,threshold)
   sval=sval or 0
-  threshold=threshold or 108
+  threshold=threshold or 109
   local severity=0
   for i=0,40,6 do
     if sval>(threshold+i) then 
@@ -3957,12 +4032,11 @@ end
 function rotorbowed(element,brg,threshold,svrtymult) -- Bent or Bowed rotor Check Function
   threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
   debugprint ("Bent or Bowed rotor started on Rotor",element,"bearing",brg)
-  local balthld = threshold or 108
-  local smult = svrtymult or 1
+  local balthld = threshold 
+  local smult = svrtymult 
   local sverity=0
-  increment_store_counter( "bowpts" )
-  z_countuniquecalls('bow','',brg,'a')
-  local rFAm=z_get123orders( "1X", element, brg, "a" )
+  local conf=0
+  local rFAm=z_get123orders( "1X", element, brg, "a",true )
   increment_store_counter( "bowpt" )
   local datami
   if rFAm.found then 
@@ -3970,6 +4044,7 @@ function rotorbowed(element,brg,threshold,svrtymult) -- Bent or Bowed rotor Chec
     --debugprint (dif1x)
     if dif1x>g_fault_tone_threshold or (dif1x>3 and rFAm.sval1x>g_significance_threshold) then
       sverity=dif1x -- not amplitude weighting
+      conf=stanford_conf(conf,.4)
       if rFAm.sval1x >balthld then sverity=sverity+z_high_level_severity(rFAm.sval1x,balthld) end
       datami=z_fault_tone_list(element,brg,"a", rFAm.sord1x, rFAm.sval1x, rFAm.aval1x,dif1x,rFAm.dsi1x,rFAm.bin1x, "Bent or Bowed rotor",'1X', rFAm.sfreq) 
       z_flag_tone_as_found (element,brg,"a",rFAm.ord1freq  ,datami)
@@ -3979,6 +4054,7 @@ function rotorbowed(element,brg,threshold,svrtymult) -- Bent or Bowed rotor Chec
 
       if dif2x>g_fault_tone_threshold or (dif2x>3 and rFAm.sval2x>g_significance_threshold) then 
         sverity=sverity+dif2x  -- not amplitude weighting
+        conf=stanford_conf(conf,.2)
         datami= z_fault_tone_list(element,brg,"a", rFAm.sord2x,rFAm.sval2x , rFAm.aval2x,dif2x,rFAm.dsi2x,rFAm.bin2x, "Bent or Bowed rotor",'2x(1X)', rFAm.sfreq*2)
         z_flag_tone_as_found (element,brg,"a",rFAm.ord2freq ,datami)
       end
@@ -3986,7 +4062,6 @@ function rotorbowed(element,brg,threshold,svrtymult) -- Bent or Bowed rotor Chec
             sverity=sverity+dif3x -- not amplitude weighting
             z_fault_tone_list(element,brg,"a",  rFAm.sord3x, rFAm.sval3x, rFAm.aval3x,dif3x ,rFAm.dsi3x,rFAm.bin3x, "Bent or Bowed rotor",'3x(1X)', rFAm.sfreq*3) 
           end  ]]
-      increment_store_counter( "bowpt" )
       local check,count = get_store_value("bowsvrty")
       if check==true then
         count = count + sverity*smult
@@ -3996,6 +4071,7 @@ function rotorbowed(element,brg,threshold,svrtymult) -- Bent or Bowed rotor Chec
       put_store_value("bowsvrty",count)
       debugprint ("Bent or Bowed rotor rule fired - Severity",sverity,count,"AAAAAAAAAAAAAAAAAAAAAA")
       assert2(1)
+      assert3(conf)
       return true
     end
   end
@@ -4007,18 +4083,11 @@ end
 function rotorbowedseverity () -- Bent or Bowed rotor severity normalization Function
   debugprint ("Bent or Bowed rotor severity started")
   local check,count = get_store_value("bowpt")
-  local check2,pts = get_store_value("bowpts")
-  count = count or pts
-  local _, calls = get_store_value("calls"..''..'bow')
-  local cls=pairscount(calls)
   local check1,svrty = get_store_value("bowsvrty")
   svrty=svrty or 0
   if check==true then
     --debugprint (check,count,check1,svrty)
-    if count-pts<0 then
-      svrty= svrty*(pts/count)
-    end
-    svrty= svrty/cls*4 -- times 4 for scaling
+    svrty= svrty/count*2 -- times 4 for scaling
     if svrty>=0 then
       debugprint ("-- Calculate Normalized Severity --",count,svrty,"Bent or Bowed rotor SSSSSSSSSSSSSSSSSSSSSSSSSSS")
       assert2(svrty)
@@ -4068,7 +4137,7 @@ function unknownrotorbars(strtag,element,brg,straxis,strrotorname,threshold,svrt
     --
     -- check peak list sorts for high severity 2XLF series
     --
-    if pl.sorts.sb_severity~={} then
+    if pl.sorts~=nil and pl.sorts.sb_severity~={} then
       if pl.sorts.sb_severity['2XLF']~=nil then
         sbseries=pl.sorts.sb_severity['2XLF']
         local sb_severity=0
@@ -4112,7 +4181,7 @@ function unknownrotorbars(strtag,element,brg,straxis,strrotorname,threshold,svrt
                               sval=sval,
                               aval=aval,
                               dif=dif,
-                              severity=z_amplitude_weighted_severity(dif,sval,108),
+                              severity=z_amplitude_weighted_severity(dif,sval,threshold),
                               sdsi=pl.peaks[sb].sdsi,
                               sbin=pl.peaks[sb].sbin,
                               sfreq=pl.peaks[sb].sfreq,
@@ -4156,11 +4225,10 @@ function pulley_vibration(element,brg,straxis,strrotorname,threshold,svrtymult) 
   if brg==3 then otherbrg=1 end
   --
   debugprint ("Pulley Eccentricity/Misalignment fault started on Rotor",element,brg,"axis",straxis)
-  local balthld = threshold or 108
-  local smult = svrtymult or 1
+  local balthld = threshold 
+  local smult = svrtymult 
   local sverity=0
-  increment_store_counter( "pmepts"..straxis..strrotorname )
-  z_countuniquecalls('1X',element..strrotorname,brg,straxis)
+  local conf=0
 
   local near1x=analyze_by_tag( "1X", element, brg, straxis,nil)
 
@@ -4172,7 +4240,8 @@ function pulley_vibration(element,brg,straxis,strrotorname,threshold,svrtymult) 
     local info=string.upper(driver).." Pulley Essentricity/Misalignment "
 
     if neardif>3 then 
-      severity=z_amplitude_weighted_severity(neardif,near1x.sval,108)
+      severity=z_amplitude_weighted_severity(neardif,near1x.sval,balthld)
+      conf=stanford_conf(conf,.4)
       datami= z_fault_tone_list(element,brg,straxis, near1x.sord, near1x.sval,near1x.sval-near1x.dif,severity,near1x.dsi,near1x.sbin, info,'PE',near1x.sfreq)
       debugprint ('near '..element,brg,straxis, near1x.sord, near1x.sval,near1x.sval-near1x.dif,severity,near1x.dsi,near1x.sbin, info,'PE',near1x.sfreq)
       z_flag_tone_as_found (element,brg,straxis, near1x.sfreq,datami,true)
@@ -4189,6 +4258,7 @@ function pulley_vibration(element,brg,straxis,strrotorname,threshold,svrtymult) 
       put_store_value("pmesvrty"..straxis..strrotorname,count)
       debugprint ("Pulley Misalignment/Eccentricity rule fired..straxis - Severity ",count,"PPPPPPPPPPPPPPPPPP")
       assert2(1)
+      assert3(conf)
       return true
     end
   end
@@ -4200,24 +4270,16 @@ end
 function pulley_vibration_severity (straxis,element,strrotorname) -- Parallel Misalignment/Eccentricity normalization Function
   debugprint ("Pulley Eccentricity/Misalignment fault  normalize started")
   local check,count = get_store_value("pmept"..straxis..strrotorname)
-  local check2,pts = get_store_value("pmepts"..straxis..strrotorname)
-  count=count or pts
-  local there, calls = get_store_value("calls"..element..strrotorname..'1X')
-  if there then
-    local cls=pairscount(calls)
+  if check then
     local check1,svrty = get_store_value("pmesvrty"..straxis..strrotorname)
     svrty=svrty or 0
-    if check==true then
-      if count-pts<0 then
-        svrty= svrty*(pts/count)
-      end
-      svrty= svrty/cls*1 -- times 2 for scaling
-      if svrty>=0 then
-        debugprint ("-- Calculated Normalized Severity --",count,svrty,"Pulley Misalignment/Eccentricity",straxis)
-        assert2(svrty)
-        return true
-      end
+    svrty= svrty/count*1 -- times 2 for scaling
+    if svrty>=0 then
+      debugprint ("-- Calculated Normalized Severity --",count,svrty,"Pulley Misalignment/Eccentricity",straxis)
+      assert2(svrty)
+      return true
     end
+
   end
   debugprint ("Pulley Misalignment/Eccentricity FALSE Severity")
   return false
@@ -4334,6 +4396,7 @@ function slipfaultseverity(percentslip)
     if fired and sev1+sev2>=0 then
       debugprint('Slip Fault evaluation returned TRUE severity '..sev1+sev2) 
       assert2(sev1+sev2)
+      assert3(.6)
       return true
     end    
   end
@@ -4348,12 +4411,13 @@ function gearghosttones_parent()
 end
 
 function gearghosttones(element,brg,straxis,strrotorname,threshold,svrtymult) -- Checks for gear ghost tones shaft rate harmonic teeth+6 through 3.5*teeth that are sidebands of gear mesh or harmonics
+  threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
   local rn=strrotorname or ''
   debugprint (rn.." Gear ghost tone rule started on "..rn.." Rotor",element,"bearing",brg,"axis",straxis)
-  increment_store_counter( "pts"..'1'..rn.."grghsttones" )
-  local thld = threshold or 108
-  local smult = svrtymult or 1
+  local thld = threshold
+  local smult = svrtymult
   local sverity=0
+  local conf=0
   local te=0
   local tc=0
   local awsth=110
@@ -4361,7 +4425,6 @@ function gearghosttones(element,brg,straxis,strrotorname,threshold,svrtymult) --
   local mpctth=.2
   local tago=get_tag_order( 'GRTTH', element, 1 )
   local teeth= tago.order
-  z_countuniquecalls('grghsttones','1',brg,straxis)
   local rF1x=analyze_by_tag( "1X", element, brg, straxis )
   increment_store_counter( "pt"..'1'..rn.."grghsttones" )
   local ordr1x=rF1x.sord
@@ -4391,6 +4454,7 @@ function gearghosttones(element,brg,straxis,strrotorname,threshold,svrtymult) --
           local tsverity=z_amplitude_weighted_severity(tone.dif,tone.sval,awsth)
           if tsverity>sevthld then
             sverity=sverity+tsverity
+            conf=stanford_conf(conf,.3)
             local sord=tostring(round((tone.gord),3))
             local inf=nopointzero(round(tone.sord))..'x('..tostring(round(speed,3))..'x)shft GT'
             local info=nopointzero(round(tone.sord))..'x('..tostring(round(speed,3))..'x) gear ghost tone on '..tostring(round(speed,3))..'x '..rn
@@ -4412,6 +4476,7 @@ function gearghosttones(element,brg,straxis,strrotorname,threshold,svrtymult) --
       put_store_value("svrty"..'1'..rn.."grghsttones",count)
       debugprint (rn.." Gear ghost tone fired - Severity",count,sverity)
       assert2(1)
+      assert3(conf)
       return true
     end  
   end 
@@ -4425,18 +4490,11 @@ function gearghosttonesseverity(element,strrotorname) -- Calculate nonsychronous
   element='1'
   local rn=strrotorname or ''
   debugprint ("Normalizing Gear ghost tone fault severity on element "..element.." on rotor "..rn)
-  local check2,points = get_store_value("pts"..element..rn.."grghsttones")
   local check,count = get_store_value("pt"..element..rn.."grghsttones")
-  count=count or points
-  local _, calls = get_store_value("calls"..element..'grghsttones')
-  local cls=pairscount(calls)
   local check1,svrty = get_store_value("svrty"..element..rn.."grghsttones")
   svrty=svrty or 0
   if check==true then
-    if count-points<0 then
-      svrty= svrty*(points/count)
-    end
-    svrty= svrty/cls
+    svrty= svrty/count
     local fault=''
     if svrty>=0 then
       debugprint (rn.." Gear ghost tones Fault Calculated Normalized Severity",count,svrty,fault)
@@ -4459,7 +4517,7 @@ function gearmesh_parent_severity()
   local tones,tonesvrty = get_store_value("GMTNS")
   local noise,noisesvrty = get_store_value("GMBBN")
   local svrty=0
-  if tones then svrty=tonesvrty end
+  if tones then svrty=.6*tonesvrty end
   if noise then svrty=svrty+.2*noisesvrty end
   if svrty>0 then
     assert2(svrty)
@@ -4483,46 +4541,50 @@ function fault_cleanup()
 end
 --
 function demodtonematch(element,brg,straxis,strrotorname,threshold,svrtymult) -- Checks for tones in the demod spectra that match tones in the normal spectra
+  threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
   local rn=strrotorname or ''
   debugprint (rn.." Demod tone nmatch rule started on "..rn.." Rotor",element,"bearing",brg,"axis",straxis, 'shaft',g_shaft_number)
-  z_countuniquecalls('demod','1',brg,straxis)
-  increment_store_counter( "pts"..'1'..rn.."demod" )
-  local thld = threshold or 108
-  local smult = svrtymult or 1
+  local thld = threshold
+  local smult = svrtymult
   local sverity=0
+  local conf=0
   local mi = safe_value_1( machine.components[g_shaft_number].map[brg], M_SHAFT_DATA_INDEX, brg )
   local alias = get_machine_element_alias(mi)
-  local pl=machine.elements[alias].data.spec.cpl.normal[straxis]
-  if pl~=nil and pl.peaks~=nil and #pl.peaks>0 then
+  if machine.elements[alias].data.spec~=nil and machine.elements[alias].data.spec.cpl~=nil and machine.elements[alias].data.spec.cpl.normal~=nil and machine.elements[alias].data.spec.cpl.normal[straxis] ~=nil then
+    local pl=machine.elements[alias].data.spec.cpl.normal[straxis]
+    if pl~=nil and pl.peaks~=nil and #pl.peaks>0 then
 
-    increment_store_counter( "pt"..'1'..rn.."demod" )
+      increment_store_counter( "pt"..'1'..rn.."demod" )
 
-    for _,p in ipairs(pl.peaks) do
-      if string.match(p.flags,'d')~=nil then 
-        if p.sev>0 then
-          sverity=sverity+p.sev 
-          local s=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , p.sval )
-          local a=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , p.aval )
-          local datami=z_fault_tone_list(element,brg,straxis,p.sord, s, a,p.sev,p.sdsi,p.sbin, 'Normal spec tone matched demod',"DEMOD", p.sfreq) 
-          --z_flag_tone_as_found (element,brg,straxis, p.sfreq ,datami)
+      for _,p in ipairs(pl.peaks) do
+        if string.match(p.flags,'d')~=nil then 
+          if p.sev>0 then
+            sverity=sverity+p.sev 
+            conf=stanford_conf(conf,.2)
+            local s=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , p.sval )
+            local a=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , p.aval )
+            local datami=z_fault_tone_list(element,brg,straxis,p.sord, s, a,p.sev,p.sdsi,p.sbin, 'Normal spec tone matched demod',"DEMOD", p.sfreq) 
+            --z_flag_tone_as_found (element,brg,straxis, p.sfreq ,datami)
+          end
         end
       end
+      --
+      if  sverity>0 then
+        local check,count = get_store_value("svrty"..'1'..rn.."demod")
+        if check==true then
+          count = count + sverity*smult
+        else
+          count = sverity*smult
+        end
+        if sverity~=0 then
+          put_store_value("svrty"..'1'..rn.."demod",count)
+          debugprint (rn.." Demod match rule fired - Severity",count,sverity)
+          assert2(1)
+          assert3(conf)
+          return true
+        end  
+      end 
     end
-    --
-    if  sverity>0 then
-      local check,count = get_store_value("svrty"..'1'..rn.."demod")
-      if check==true then
-        count = count + sverity*smult
-      else
-        count = sverity*smult
-      end
-      if sverity~=0 then
-        put_store_value("svrty"..'1'..rn.."demod",count)
-        debugprint (rn.." Demod match rule fired - Severity",count,sverity)
-        assert2(1)
-        return true
-      end  
-    end 
   end
   debugprint (rn.." Demod match rule FALSE")
   return false
@@ -4532,18 +4594,12 @@ end
 function demodtonematchseverity(element,strrotorname) -- Calculate demod mtone match Normalized Severity
   local rn=strrotorname or ''
   debugprint ("Normalizing demode tone match severity on element "..element.." on rotor "..rn)
-  local check2,points = get_store_value("pts"..element..rn.."demod")
+  --local check2,points = get_store_value("pts"..element..rn.."demod")
   local check,count = get_store_value("pt"..element..rn.."demod")
-  count=count or points
-  local _, calls = get_store_value("calls"..element..'demod')
-  local cls=pairscount(calls)
   local check1,svrty = get_store_value("svrty"..element..rn.."demod")
   svrty=svrty or 0
   if check==true then
-    if count-points<0 then
-      svrty= svrty*(points/count)
-    end
-    svrty= svrty/cls*5
+    svrty= svrty/count*2
     local fault=''
     if svrty>=0 then
       debugprint (rn.." demod tone match Fault Calculated Normalized Severity",count,svrty,fault)
@@ -4575,7 +4631,6 @@ end
 -- If startfreq and stopfreq are nil then the spec has no frequency constraints
 --**************************************************
 function fixedspec(element,brg,straxis,strrotorname,threshold,svrtymult) -- Generic Rotor Balance Check Function
-  --goto out
   threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
   local spec=fixedspecparameter() 
   local rn=strrotorname or ''
@@ -4583,11 +4638,10 @@ function fixedspec(element,brg,straxis,strrotorname,threshold,svrtymult) -- Gene
   if spec~=nil and #spec>0 then
 
     local rff={}
-    increment_store_counter( "ptsfix")
-    local balthld=threshold or 108
-    local smult=svrtymult or 1
+    local balthld=threshold
+    local smult=svrtymult
     local sverity=0
-    z_countuniquecalls('1x','fix',brg,straxis)
+    local conf=0
     for _,sp in ipairs(spec) do
       local tag=sp.tag
       local spec=sp.spec
@@ -4607,6 +4661,7 @@ function fixedspec(element,brg,straxis,strrotorname,threshold,svrtymult) -- Gene
             local dif=sval-aval
             if dif >0  then
               sverity=z_amplitude_weighted_severity( dif,sval,threshold)*4
+              conf=stanford_conf(conf,.3)
               local exc=round(ConvertSpectrum(GetUnitFromId(g_unit_id),Unit[sp.unit],sval,freq)*to_rms,2)
               local datami
               if trouble_shoot then
@@ -4625,6 +4680,7 @@ function fixedspec(element,brg,straxis,strrotorname,threshold,svrtymult) -- Gene
               if sverity~=0 then 
                 put_store_value("fixsvrty",count)
                 assert2(1)
+                assert3(conf)
                 debugprint ("Fixed spec rule fired - Severity",sverity,'dif',dif,'aval', aval,'sval', sval)
                 return true
               end
@@ -4635,11 +4691,7 @@ function fixedspec(element,brg,straxis,strrotorname,threshold,svrtymult) -- Gene
       end
     end
   end
-
-  ::out::
   debugprint ("Fixed spec rule FALSE")
---]]
-
   return false
 end
 --
@@ -4648,16 +4700,10 @@ end
 function fixedspecseverity(strrotorname) -- Calculate balance Normalized Severity function
   local name=strrotorname or ""
   debugprint (name..' Fixed spec normalization started')
-  local check2,pts = get_store_value("ptsfix")
   local check,count = get_store_value("ptfix")
   local check1,svrty = get_store_value("fixsvrty")
-  local _, calls = get_store_value("calls"..'fix'..'1x')
-  local cls=pairscount(calls)
   if check==true then
-    if count-pts<0 then
-      svrty= svrty*(pts/count)
-    end
-    svrty= svrty/cls*5  -- normalized to one axis and multiplied times 3 for scaling
+    svrty= svrty/count*5  -- normalized to one axis and multiplied times 3 for scaling
     if svrty>=0 then
       debugprint ("-- Fixed spec Calculate Normalized Severity --",count,svrty,name,"Rotor Balance" )
       assert2(svrty)
@@ -4671,12 +4717,11 @@ end
 function sheaveproblem(element,brg,straxis,threshold,svrtymult) -- sheave problem - looks at 1x and 2x of near sheave 
   threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
   debugprint ("Sheave Problem started on Rotor",element,"bearing",brg,'axis',straxis )
-  local ampthresh=tonumber(get_attribute_value("AMPTHRESH",element, 108))
-  local smult = svrtymult or 1
+  local ampthresh=threshold
+  local smult = svrtymult
   local sverity=0
-  increment_store_counter( "sppts" )
-  z_countuniquecalls('sp','sp',brg,straxis)
-  local rFpm=z_get123orders( "1X", element, brg, straxis )
+  local conf=0
+  local rFpm=z_get123orders( "1X", element, brg, straxis ,true)
   if rFpm.found then 
     increment_store_counter( "sppt" )
     local dif1x=rFpm.dif1x
@@ -4695,6 +4740,7 @@ function sheaveproblem(element,brg,straxis,threshold,svrtymult) -- sheave proble
       if (dif1x>g_fault_tone_threshold or (dif1x>3 and sval1x>g_significance_threshold)) then 
         local sverity1x=z_amplitude_weighted_severity(dif1x,sval1x,ampthresh)
         sverity=sverity+sverity1x  
+        conf=stanford_conf(conf,.4)
         datami= z_fault_tone_list(element,brg,straxis, sord1x, sval1x, sval1x-dif1x,sverity1x,rFpm.dsi1x,rFpm.bin1x, "Sheave Problem",'1X',rFpm.sfreq)
         z_flag_tone_as_found (element,brg,straxis, rFpm.ord1freq,datami)
       end
@@ -4703,6 +4749,7 @@ function sheaveproblem(element,brg,straxis,threshold,svrtymult) -- sheave proble
       if (dif2x>g_fault_tone_threshold or (dif2x>3 and sval2x>g_significance_threshold)) then 
         local sverity2x=z_amplitude_weighted_severity(dif2x,sval2x,ampthresh)
         sverity=sverity+sverity2x  
+        conf=stanford_conf(conf,.2)
         datami= z_fault_tone_list(element,brg,straxis, sord2x, sval2x, sval2x-dif2x,sverity2x,rFpm.dsi2x,rFpm.bin2x, "Sheave Problem",'2X',rFpm.sfreq*2)
         z_flag_tone_as_found (element,brg,straxis, rFpm.ord2freq,datami)
       end
@@ -4719,6 +4766,7 @@ function sheaveproblem(element,brg,straxis,threshold,svrtymult) -- sheave proble
       put_store_value("spsvrty",count)
       debugprint ("Sheave problem rule fired - Severity",count,"PPPPPPPPPPPPPPPPPP")
       assert2(1)
+      assert3(conf)
       return true
     end
   end
@@ -4733,17 +4781,10 @@ function sheaveproblemseverity () -- sheave problem normalization Function
 
   debugprint ("Sheave problem normalize started")
   local check,count = get_store_value("sppt")
-  local check2,pts = get_store_value("sppts")
-  count=count or pts
   local check1,svrty = get_store_value("spsvrty")
-  local _, calls = get_store_value("calls"..'sp'..'sp')
-  local cls=pairscount(calls)
   svrty=svrty or 0
   if check==true then
-    if count-pts<0 then
-      svrty= svrty*(pts/count)
-    end
-    svrty= svrty/cls*3 -- timeS 3 for scaling
+    svrty= svrty/count*2 -- timeS 3 for scaling
     if svrty>=0 then
       debugprint ("-- Calculate Normalized Severity --",count,svrty,"Sheave problem ")
       assert2(svrty)
@@ -4772,15 +4813,13 @@ function beltrate(element,brg,straxis,strrotorname,threshold,svrtymult) -- Looks
   threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
   local rn=strrotorname or ''
   debugprint ("Belt rate evaluation started on "..rn.." Rotor",element,"bearing",brg,"axis",straxis)
-  increment_store_counter( "BRpts"..rn )
-  local BRthld=threshold  or 110
-  local smult=svrtymult or 1
-  z_countuniquecalls('BR','',brg,straxis)
+  local BRthld=threshold 
+  local smult=svrtymult
   local c=get_attribute_value( "PULLEYCENTERDIST", 0, 0 )
   local d1=get_attribute_value( "PULDIA", 2, 0 )
   local d2=get_attribute_value( "PULDIA", 4, 0 )
   local br=get_attribute_value( "PULLEYBELTRATE", 0, 0 )
-  if (c==0 or d1==0 or d2==0) and br==0 then  
+  if (c==0 and d1==0 and d2==0) or br==0 then  
     debugprint (rn.." Belt rate failed due to not enough demensions available")
     return false
   end 
@@ -4792,12 +4831,12 @@ function beltrate(element,brg,straxis,strrotorname,threshold,svrtymult) -- Looks
     local bearing,alias,spdratio =z_get_brg_and_data_set_speed_ratio(element,brg)
     local br1xord
     local dia=get_attribute_value( "PULDIA", element, 0 ) 
-    -- if br==0 or true then
-    local bl=(2*c)+((math.pi/2)*(d1+d2))+(math.abs(d1-d2)^2/(4*c))
-    br1xord=(rF1x.sord*dia*math.pi)/bl
-    --else
-    -- br1xord=br/spdratio*rF1x.sord
-    -- end
+    if br==0  then
+      local bl=(2*c)+((math.pi/2)*(d1+d2))+(math.abs(d1-d2)^2/(4*c))
+      br1xord=(rF1x.sord*dia*math.pi)/bl
+    else
+      br1xord=br/spdratio*rF1x.sord
+    end
     if sr1x==nil then
       for i,ds in ipairs (machine.datasets)  do
         if ds.dom=='spec' and ds.typ=='normal' and ds.axis==straxis and ds.mi==alias then
@@ -4812,6 +4851,7 @@ function beltrate(element,brg,straxis,strrotorname,threshold,svrtymult) -- Looks
     local step=.02
     local totalsvrity=0
     local sverity=0
+    local conf=0
     local rFBR=0 
     local BRdif=0
     local BRval=0
@@ -4825,7 +4865,7 @@ function beltrate(element,brg,straxis,strrotorname,threshold,svrtymult) -- Looks
     local lastmdif=0
     local lastbin=0
     local lastsfreq=0
-    local foundone
+    local foundone=false
     for harm=1,4,1 do
       if foundone and harm<=3 then
         br1xord=lastord/(harm-1)
@@ -4835,27 +4875,29 @@ function beltrate(element,brg,straxis,strrotorname,threshold,svrtymult) -- Looks
       lastdif=0
       local start=br1xord*harm-(.1*br1xord)
       local stop=br1xord*harm+(.1*br1xord)
-      for i=start,stop,(stop-start)/10 do
-        rFBR = analyze_by_order( i, brg, straxis ,true,true,true )
-        if rFBR~=nil and rFBR.found and rFBR.dif~=nil then
-          local istarget,x,frac=z_is_a_multiple(i,rFBR.sord,.01) 
-          istarget=istarget and x==1
-          if istarget--[[frac<.015 or 1-frac<.015]] then
-            local othershaft=false
-            local ratio=get_comp_speed_ratios()[get_this_comp_number()]
-            BRdif=rFBR.dif
-            BRval=rFBR.sval
-            BRord=rFBR.sord  
-            BRmdif=rFBR.mdif
-            BRbin=rFBR.sbin
-            BRsfreq=rFBR.sfreq
-            if BRval>lastsval then
-              lastsval=BRval
-              lastdif=BRdif
-              lastord=BRord
-              lastmdif=BRmdif
-              lastbin=BRbin
-              lastsfreq=BRsfreq
+      if stop-start>0 then
+        for i=start,stop,(stop-start)/10 do
+          rFBR = analyze_by_order( i, brg, straxis ,true,true,true )
+          if rFBR~=nil and rFBR.found and rFBR.dif~=nil then
+            local istarget,x,frac=z_is_a_multiple(i,rFBR.sord,.01) 
+            istarget=istarget and x==1
+            if istarget--[[frac<.015 or 1-frac<.015]] then
+              local othershaft=false
+              local ratio=get_comp_speed_ratios()[get_this_comp_number()]
+              BRdif=rFBR.dif
+              BRval=rFBR.sval
+              BRord=rFBR.sord  
+              BRmdif=rFBR.mdif
+              BRbin=rFBR.sbin
+              BRsfreq=rFBR.sfreq
+              if BRval>lastsval then
+                lastsval=BRval
+                lastdif=BRdif
+                lastord=BRord
+                lastmdif=BRmdif
+                lastbin=BRbin
+                lastsfreq=BRsfreq
+              end
             end
           end
         end
@@ -4877,7 +4919,8 @@ function beltrate(element,brg,straxis,strrotorname,threshold,svrtymult) -- Looks
           foundone=true
           brsverity=z_amplitude_weighted_severity(lastdif,lastsval,BRthld)
           sverity=sverity+brsverity
-          z_fault_tone_list(element,brg,straxis, lastord, lastsval, lastsval-lastdif,brsverity ,rFBR.sbin,lastbin, "Belt rate Fault",'belt rate', lastord/spdratio*sr1x ) 
+          conf=stanford_conf(conf,.4)
+          z_fault_tone_list(element,brg,straxis, lastord, lastsval, lastsval-lastdif,brsverity ,rFBR.sbin,lastbin, harm.."x Belt rate Fault",harm..'x belt rate', lastord/spdratio*sr1x ) 
           z_flag_tone_as_found (element,brg,straxis,BRsfreq,bearing,true)
           debugprint( harm..'x Belt rate found at '..round(lastord,3)..'x on '..brg, straxis ,lastsval,brsverity, sverity) 
         end
@@ -4889,6 +4932,7 @@ function beltrate(element,brg,straxis,strrotorname,threshold,svrtymult) -- Looks
       put_store_value("BRsvrty"..rn,count+sverity)
       debugprint ("Belt rate rule fired- Severity "..count+sverity.." on "..rn.." rotor")
       assert2(1)
+      assert3(conf)
       return true
     end
     debugprint (rn.." Belt rate FALSE")
@@ -4902,23 +4946,11 @@ end
 function beltrateseverity(strrotorname)-- Belt Rate normalization function
   local rn=strrotorname or ''
   debugprint ("Normalizing Belt rate severity fault on rotor "..rn)
-  local check2,points = get_store_value("BRpts"..rn)
-  --debugprint ("BRpts"..rn,check2,points)
   local check,count = get_store_value("BRpt"..rn)
-  --debugprint ("BRpt"..rn,check,count)
-  count=count or points
-  --
   local check1,svrty = get_store_value("BRsvrty"..rn)
-  --debugprint ("BRsvrty"..rn,check1,svrty)
   svrty=svrty or 0
-  local _, calls = get_store_value("calls"..''..'BR')
-  local cls=pairscount(calls)
-  --debugprint ('BR',points,count,svrty)
   if check==true then
-    if count-points<0 then
-      svrty= svrty*(points/count)
-    end
-    svrty= svrty/cls
+    svrty= svrty/count*2
     if svrty>=0 then
       debugprint ("Belt rate Issue Calculated Normalized Severity",count,svrty)
       assert2(svrty)
@@ -4957,7 +4989,8 @@ function analyze_waveform_for_transcients( element, brg, straxis,rn,creshthreshh
   local freq1x
   local tot,nt,maxv=0,0,0
   local pf=2  -- parcing factor
-  local sr=1  -- sum range 
+  local sr=1  -- sum range
+  local dsi
   for _,dsi in ipairs(wfdsi) do
     local wave=machine.datasets[dsi].data
     local bw=machine.datasets[dsi].bw
@@ -5113,7 +5146,7 @@ function analyze_waveform_for_transcients( element, brg, straxis,rn,creshthreshh
       sev=amp.val*10
     end
     if sev>0 then
-      z_fault_tone_list(element,brg,straxis, ord, sev, (tot/nt) ,sev,dsi,1,'Impacting on '..rn, "Impct",ord*freq1x )
+      z_fault_tone_list(element,brg,straxis, ord, sev, (tot/nt) ,sev,dsi,1,'Impacting in waveform on '..rn, "WF Impct",ord*freq1x )
 --z_fault_tone_list(element,brg,straxis, orderlow, sval, aval,sev,dsi,bin, info, fo_info, orderfreq, orderhigh)
 
       fired=true
@@ -5130,17 +5163,17 @@ end
 
 --
 function impactingfault(element,brg,straxis,strrotorname,threshold,svrtymult) -- Checks for indications of repetitive impacting in waveform data
+  threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
   local rn=strrotorname or ''
-  debugprint (rn.." Impact rule started on "..rn.." Rotor",element,"bearing",brg,"axis",straxis)
-  increment_store_counter( "pts"..element..rn.."impact" )
-  local thld = threshold or 108
-  local smult = svrtymult or 1
+  local imptyp='Impact'
+  if rn=='PUMP' then imptyp="Cavitation Impulse" end
+  debugprint (rn..imptyp.." rule started on "..rn.." Rotor",element,"bearing",brg,"axis",straxis)
+  local thld = threshold
+  local smult = svrtymult
   local sverity=0
-  z_countuniquecalls('impact',element,brg,straxis)
   local fired,hits=analyze_waveform_for_transcients( element, brg, straxis,rn,3) 
   increment_store_counter( "pt"..element..rn.."impact" )
   if fired then sverity=sverity+(hits) end
-
   --
   if  sverity>0 then
     local check,count = get_store_value("svrty"..element..rn.."impact")
@@ -5153,7 +5186,13 @@ function impactingfault(element,brg,straxis,strrotorname,threshold,svrtymult) --
       put_store_value("svrty"..element..rn.."impact",count)
       debugprint (rn.." impact fault fired - Severity",count,sverity)
       assert2(1)
+      assert3(.2)
+      --put_store_value(element.."CAVIMP",sverity)
+      --if rn~='PUMP' then
       return true
+      --else
+
+      --end
     end  
   end 
 
@@ -5165,23 +5204,17 @@ end
 function impactingfaultseverity(element,strrotorname) -- Calculate impact fault match Normalized Severity
   local rn=strrotorname or ''
   debugprint ("Normalizing impact fault severity on element "..element.." on rotor "..rn)
-  local check2,points = get_store_value("pts"..element..rn.."impact")
   local check,count = get_store_value("pt"..element..rn.."impact")
-  count=count or points
-  local _, calls = get_store_value("calls"..element..'impact')
-  local cls=pairscount(calls)
   local check1,svrty = get_store_value("svrty"..element..rn.."impact")
   svrty=svrty or 0
   if check==true then
-    if count-points<0 then
-      svrty= svrty*(points/count)
-    end
-    svrty= svrty/cls
+    svrty= svrty/count
     local fault=''
     if svrty>=0 then
       debugprint (rn.." impact fault Calculated Normalized Severity",count,svrty,fault)
       assert2(svrty)
       put_store_value("impact",svrty)
+      put_store_value(element.."CAVIMP",svrty)
       return true
     end
   end
@@ -5190,7 +5223,8 @@ function impactingfaultseverity(element,strrotorname) -- Calculate impact fault 
   return false,0
 end  -- function 
 --
-function constantaccelspec(refval,order,reford,min) -- calculates a 6 dB per octave applitude reduction for a without average specification
+--[[ moved to functions.lua
+function constantaccelspec(refval,order,reford,min) -- calculates a 6 dB per octave applitude reduction for a without average specification m
   reford=reford or 1
   min=min or 60
   local val=refval-10
@@ -5199,4 +5233,477 @@ function constantaccelspec(refval,order,reford,min) -- calculates a 6 dB per oct
   end
   if val<min then val=min end
   return val
+end ]]
+--
+function pump_cavitation_parent(element)
+  debugprint('Pump cavitation parent rule started on element '..element)
+  return true
 end
+function pump_cavitation_severity(element)
+  debugprint('Pump Cavitation parent rule severity started')
+  local imp,impsvrty = get_store_value(element.."CAVIMP")
+  local pvnoise,pvnoisesvrty = get_store_value('BBsvrty'..element.."PVBN")
+  local noise,noisesvrty = get_store_value('BBsvrty'..element.."CAVBN")
+  local svrty=0
+  if imp then svrty=.3*impsvrty end
+  if pvnoise then svrty=svrty+.1*pvnoisesvrty end
+  if noise then svrty=svrty+.1*noisesvrty end
+  if svrty>0 then
+    debugprint('Pump Cavitation parent rule severity TRUE')
+    assert2(svrty)
+    return true
+  else 
+    debugprint('Pump Cavitation parent rule severity FALSE')
+    assert3(-1)
+    return false
+  end
+end
+-- TRAIN RATE RULE
+function trainrate(element,brg,straxis,strrotorname,threshold,svrtymult) -- Looks for sideband series between .34x and .61x that is not .5x
+  threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
+  local rn=strrotorname or ''
+  local rff={}
+  debugprint ("Train Rate rule started on "..rn.." Rotor",element,"bearing",brg,"axis",straxis)
+  local balthld=threshold
+  local smult=svrtymult
+  local sverity=0
+  local conf=0
+  local rFBal=find_tag_info( "1X", element, brg, straxis )
+  if rFBal.found then
+    local sub1x=get_sub1xrepeats_from_cpl(element,brg,straxis) 
+    increment_store_counter( "pttr" )
+    if sub1x~={} then
+      local bearing,alias,spdratio =z_get_brg_and_data_set_speed_ratio(element,brg)
+      local shaftspeeds=get_comp_speed_ratios()
+      local ratios,speeds={},{}
+      for ci,csr in pairs (g_comp_speed_ratio) do
+        ratios[csr]=true
+      end    
+      for rat,_ in pairs(ratios) do
+        table.insert(speeds,rat/spdratio)
+      end
+      local isa1x,istrainrate=false,false
+      for fr,val in pairs(sub1x) do
+        for _,sp in ipairs(speeds) do
+          local ismult,m,r=is_a_multiple(sp,fr,.003)
+          if ismult --[[and m==1]] and not(isa1x) then isa1x=true end
+        end
+
+        if not(isa1x) and fr/spdratio>.34 and fr/spdratio<.48 then 
+          istrainrate=true
+          if istrainrate and val.sev~=nil and val.sev>10 and val.hits>3  then
+            sverity=sverity+val.sev
+            conf=stanford_conf(conf,.3)
+            local datami
+
+            datami=z_fault_tone_list(element,brg,straxis,fr, val.hits,0,val.sev,rFBal.dsi,rFBal.bin, "Bearing Train Rate "..rn,"1X", machine.datasets[rFBal.dsi].speed*fr/spdratio)
+
+            --z_flag_tone_as_found (element,brg,straxis, rFBal.sfreq ,datami)
+            local check,count = get_store_value("trsvrty")
+            if check==true then
+              count = count + sverity*smult
+            else
+              count = sverity*smult
+            end
+
+
+            if sverity~=0 then 
+              put_store_value("trsvrty",count)
+              assert2(1)
+              assert3(conf)
+              debugprint ("Train Rate rule fired - Severity",sverity,' hits',val.hits,'sev', val.sev,'ord',fr,'shaft order',fr/spdratio)
+            end
+          end 
+        end
+      end
+      if sverity~=0 then return true end
+    end  
+  end
+  debugprint ("Train Rate rule FALSE")
+  return false
+end
+--
+-- Calculate Train Rate Normalized Severity function
+--
+function trainrateseverity(strrotorname) -- Calculate Train Rate Normalized Severity function
+  local name=strrotorname or ""
+  debugprint (name..' Train Rate severity normalization started')
+  local check,count = get_store_value("pttr")
+  local check1,svrty = get_store_value("trsvrty")
+  if check==true then
+    svrty= svrty/count*1   -- normalized to one axis and multiplied times 8 for scaling
+    if svrty>=0 then
+      debugprint ("-- Calculate Normalized Severity --",count,svrty,name,"Train Rate" )
+      assert2(svrty)
+      return true
+    end
+  end
+  debugprint ("Train Rate severity false")
+  return false
+end
+function get_sub1xrepeats_from_cpl(element,brg,axis,sev_th,nr,sval_th,ghost)
+  local mi = safe_value_1( machine.components[g_shaft_number].map[brg], M_SHAFT_DATA_INDEX, brg )
+  local alias = get_machine_element_alias(mi)
+  local pl=machine.elements[alias].data.spec.cpl.normal[axis]
+  local shaftspeed=machine.elements[alias].speedratio
+  local cn=get_this_comp_number()
+  local shaftspeeds=get_comp_speed_ratios()
+  local ss1x=shaftspeeds[machine.ispeed]
+  local s1x=shaftspeeds[cn]
+  local brgspeed=s1x/shaftspeed
+  local srat=get_speed_ratio_to_driver( brg )
+  local harmonics={}
+  for fr,v in pairs(pl.sub1x_spacing) do
+    fr=tostring(fr)
+    if pl.harmonics[fr]~=nil then
+      harmonics[fr]={}
+      local temp={}
+      for _,pi in ipairs(pl.harmonics[fr]) do
+        --temp=
+        table.insert(harmonics[fr],pl.peaks[pi])
+      end
+    end
+  end
+
+
+  return pl.sub1x_spacing,harmonics
+end 
+-- Bearing RE broken Cage
+function brokencage(element,brg,straxis,strrotorname,threshold,svrtymult) -- Looks for train rate harmonic .(34x and .48x)
+  threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
+  local rn=strrotorname or ''
+  local rff={}
+  debugprint ("Broken Cage rule started on "..rn.." Rotor",element,"bearing",brg,"axis",straxis)
+  local balthld=threshold
+  local smult=svrtymult
+  local sverity,sver=0
+  local conf=0
+  local rFBal=find_tag_info( "1X", element, brg, straxis )
+  if rFBal.found then
+    local order1x=rFBal.order
+    local sub1x,harmonics=get_sub1xrepeats_from_cpl(element,brg,straxis) 
+    increment_store_counter( "ptbc" )
+    if sub1x~={} then
+      local bearing,alias,_,spdratio =z_get_brg_and_data_set_speed_ratio(element,brg)
+      local shaftspeeds=get_comp_speed_ratios()
+      local ratios,speeds={},{}
+      for ci,csr in pairs (g_comp_speed_ratio) do
+        ratios[csr]=true
+      end    
+      for rat,_ in pairs(ratios) do
+        table.insert(speeds,rat/spdratio)
+      end
+      local isa1x,istrainrate=false,false
+      for fr,val in pairs(sub1x) do
+        for _,sp in ipairs(speeds) do
+          local ismult,m,r=is_a_multiple(sp,fr,.003)
+          if ismult --[[and m==1]] and not(isa1x) then isa1x=true end
+        end
+
+        if not(isa1x) and fr/order1x>.34 and fr/order1x<.48 then 
+          istrainrate=true
+          if istrainrate and val.sev~=nil and val.sev>10 and val.hits>3  then
+            if harmonics[tostring(fr)]~=nil and #harmonics[tostring(fr)]>0 then
+              for _,pk in ipairs(harmonics[tostring(fr)]) do
+                local isshaftmult=false
+                for _,sp in ipairs(speeds) do
+                  local ismult,m,r=is_a_multiple(sp,pk.sord,.003)
+                  if ismult then  isshaftmult=true end
+                end
+                if true or not (isshaftmult) --[[and pk.sord/fr<8]] then
+                  local aval=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , pk.aval )
+                  local sval=ConvertSpectrum( g_internal_unit  , Unit.U_VDB , pk.sval )
+                  local dif=sval-aval
+
+                  if ((dif > g_fault_tone_threshold or (dif >3  and sval>g_significance_threshold)))then
+                    sver=z_amplitude_weighted_severity( dif,sval,balthld)
+                    sverity=sverity+sver
+                    conf=stanford_conf(conf,.2)
+                    local datami
+                    debugprint(nopointzero(round(pk.sord/fr))..'x Cage Rate Tone at '..round(pk.sord,3)..' orders '..round(pk.sfreq,2)..' Hz '..round(sver,1)..' severity')
+                    datami=z_fault_tone_list(element,brg,straxis,pk.sord, sval, aval,sver,pk.sdsi,pk.sbin, nopointzero(round(pk.sord/fr))..'x('..fr..') Cage Rate Harmonic '..rn,nopointzero(round(pk.sord/fr))..'x('..fr..')Cage', pk.sfreq) 
+
+                    --z_flag_tone_as_found (element,brg,straxis, rFBal.sfreq ,datami)
+                  end
+                end
+              end
+            end
+            local check,count = get_store_value("bcsvrty")
+            if check==true then
+              count = count + sverity*smult
+            else
+              count = sverity*smult
+            end
+
+
+            if sverity~=0 then 
+              put_store_value("bcsvrty",count)
+              assert2(1)
+              assert3(conf)
+              debugprint ("Broken Cage rule fired - Severity",sverity,'ord',fr,'shaft order',fr/spdratio)
+            end
+          end 
+        end
+      end
+      if sverity~=0 then return true end
+    end  
+  end
+  debugprint ("Broken Cage rule FALSE")
+  return false
+end
+--
+-- Calculate Train Rate Normalized Severity function
+--
+function brokencageseverity(strrotorname) -- Calculate Broken Cage Normalized Severity function
+  local name=strrotorname or ""
+  debugprint (name..' Broken Cage severity normalization started')
+  local check,count = get_store_value("ptbc")
+  local check1,svrty = get_store_value("bcsvrty")
+  if check==true then
+    svrty= svrty/count*3   -- normalized to one axis and multiplied times 8 for scaling
+    if svrty>=0 then
+      debugprint ("-- Calculate Normalized Severity --",count,svrty,name,"Broken Cage" )
+      assert2(svrty)
+      return true
+    end
+  end
+  debugprint ("Broken Cage severity false")
+  return false
+end
+function mixedpickups()
+  local result={}
+  local maxgrtr=0
+  local maxless=0
+  local ret=false
+  local sev,goods,avedif,pu,isoks=0,0,0,0,0
+  local louddata=false
+  local dupdata=get_fault_all('e20f8da1-d8f7-4153-99fa-f1482b7d80b9') -- search for duplicate data fault firing in quality.
+  if not (dupdata) then
+    for e1,e in ipairs(machine.elements) do 
+      if e.data~=nil and e.data.spec~=nil and e.data.spec.cpl~=nil then
+        for typ,axes in pairs(e.data.spec.cpl) do
+          if typ=='normal' then
+            for ax, pl in pairs(axes) do
+              if ax=='a' and pl.aveavecomp~=nil then
+                result[e1]={}
+                result[e1].data={}
+                for e2,inf in pairs(pl.aveavecomp) do
+                  result[e1].data[e2]={}
+                  result[e1].data[e2].ac=pl.aveavecomp[e2]
+                  result[e1].data[e2].pfrat=pl.aveavecomp[e1].percentfound/pl.aveavecomp[e2].percentfound
+                  if machine.elements[e2].data.spec.cpl.normal.a~=nil then 
+                    result[e1].data[e2].avesameas=machine.elements[e2].data.spec.cpl.normal.a.avetoave.avesameas
+                    if e1==e2 then
+                      result[e1].data[e2].isok= inf.percentgreater<=25 and inf.percentless<=50 and math.abs(inf.dbgreater-inf.dbless)<=25 --and (inf.hftotal<10 or (inf.hftotal>=10 and inf.hfpercentfound>=10))
+                    else
+                      result[e1].data[e2].better=(pl.aveavecomp[e1].percentgreater+pl.aveavecomp[e1].percentless)>inf.percentgreater+inf.percentless and inf.percentgreater<=15 and inf.percentless<=30 and math.abs(inf.dbgreater-inf.dbless)<=10
+                      result[e1].data[e2].worse=  inf.percentgreater>30 or inf.percentless>60 or math.abs(inf.dbgreater-inf.dbless)>30
+
+                    end
+                  end
+                  maxgrtr=math.max(maxgrtr,inf.percentgreater)
+                  maxless=math.max(maxless,inf.percentless)
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+    for e1,inf in pairs(result) do
+      pu=pu+1
+      local lc,c=0,0
+      local itsok=inf.data[e1].isok
+      local dupave={}
+      if inf.data[e1].avesameas~=nil and inf.data[e1].avesameas then
+        for i,v in ipairs(inf.data[e1].avesameas) do
+          --dupave[i]=v
+          dupave[v]=true
+        end
+      end
+      for e2,data in pairs (inf.data) do
+        local good=0
+        local cpl=machine.elements[e1].data.spec.cpl
+        local sigdif=false
+        if cpl['normal']~=nil and cpl['normal']['a']~=nil and cpl['normal']['a']['avetoave']~=nil and cpl['normal']['a']['avetoave'][e2]~=nil then 
+          local avetoave=cpl['normal']['a']['avetoave'][e2]
+          local lopct=0
+          if avetoave.matches>0 then lopct=avetoave.less/avetoave.matches end
+          local hipct=0 
+          if avetoave.matches>0 then hipct=avetoave.greater/avetoave.matches end
+          if ((hipct>=1/4 or lopct>=1/4) and avetoave.matches>6) or hipct>=.5 or lopct>=.5 or math.abs(avetoave.dbgreater+avetoave.dbless)>=20 then 
+            sigdif=true
+            avedif=avedif+1
+          else
+            avedif=avedif-1
+          end
+        end
+        c=c+1
+        if data.ac.percentgreater>=50 then
+          lc=lc+1
+        end
+
+        if e1==e2  then
+          if data.isok then
+            isoks=isoks+1 
+            good=good+1
+          end
+          if  data.ac.hftotal>=10 and (data.ac.hfpercentfound>60 or data.ac.hftotal*data.ac.hfpercentfound/100>12)  then  -- real1y good hf match to average
+            good=good+1
+          end 
+          if  data.ac.hftotal>=5 and data.ac.hfpercentfound>=20 then  -- ok hf match to average
+            good=good+1
+          end 
+          if data.ac.hftotal>=10 and data.ac.hfpercentfound<=5 then -- real1y bad hf match to average
+            good=good-1
+          end
+          goods=goods+good
+        else if e1~=e2 and sigdif and not(dupave~=nil and dupave[e2]~=nil and dupave[e2]) then
+          if data.avesameas~=nil and data.avesameas then
+            for i,v in ipairs(data.avesameas) do
+              --dupave[i]=v
+              dupave[v]=true
+            end
+          end
+          --if data.ac.prctgreaterabs<40 then
+          if  data.ac.hftotal>=10 and (data.ac.hfpercentfound>60 or data.ac.hftotal*data.ac.hfpercentfound/100>12)  then  -- real1y good hf match to other average
+            good=good-1
+          end
+          if data.ac.hftotal>=5 and data.ac.hfpercentfound>=20  then  -- ok hf match to other average
+            good=good-1
+          end
+          --end
+          if data.ac.hftotal>=10 and data.ac.hfpercentfound<=5  then -- real1y bad hf match to other average
+            good=good+1
+          end
+          if  data.better   then -- data is significantly closer to +10/-23 dB band of other average then this average
+            good=good-1
+          end
+          if data.worse   then -- data is significantly closer to +10/-23 dB band of this other average then other average
+            good=good+1
+          end
+          goods=goods+good
+        end
+        local _
+      end
+    end
+
+    if lc==c then 
+      louddata=true
+    end
+  end
+  sev=maxgrtr
+
+  if goods<0 and not(louddata) and sev>20 and avedif>=0 and pu>1 and not (isoks>=pu-1 and pu>2) then
+    assert2(sev)
+    return true
+  end
+end
+return false
+end
+
+-- Calibration check
+function calcheck(element,brg,straxis,threshold,svrtymult) -- Coupling Angular Misalignment Check Function
+  threshold,svrtymult=z_get_rule_tune_info(element,threshold,svrtymult)
+  debugprint ("Calibration check on ",straxis)
+  local useave=false
+  local balthld = threshold
+  local smult = svrtymult
+  local sverity=0
+  local conf=0
+  local rFAm=z_get123orders( "1X", element, brg, straxis,true )
+  if rFAm.found then 
+    increment_store_counter( "calpt" )
+    local datami
+    local dif1x=math.abs(rFAm.dif1x)
+    if rFAm.aval1x>0 and useave then
+      if math.abs(rFAm.dif1x)>3 then  --or rFAm.dif2x>6 or FAm.dif3x>6 then
+        conf=stanford_conf(conf,.3)
+        local calsvty=6*math.abs(rFAm.dif1x)
+        sverity=calsvty
+        datami=z_fault_tone_list(element,brg,straxis, rFAm.sord1x, rFAm.sval1x, rFAm.aval1x,calsvty,rFAm.dsi1x,rFAm.bin1x, "Accelerometer Cal 1X",'Cal 1X', rFAm.sfreq) 
+        z_flag_tone_as_found (element,brg,straxis, rFAm.ord1freq ,datami)
+      end
+      if math.abs(rFAm.dif2x)>6 then 
+        conf=stanford_conf(conf,.1)
+        local calsvty=6*math.abs(rFAm.dif2x)
+        sverity=sverity+calsvty
+        datami=z_fault_tone_list(element,brg,straxis, rFAm.sord2x, rFAm.sval2x, rFAm.aval2x,calsvty,rFAm.dsi2x,rFAm.bin2x, "Accelerometer Cal 2X",'Cal 2X', rFAm.ord2freq) 
+        z_flag_tone_as_found (element,brg,straxis, rFAm.ord2freq ,datami)
+      end
+      if math.abs(rFAm.dif3x)>6 then 
+        conf=stanford_conf(conf,.1)
+        local calsvty=6*math.abs(rFAm.dif3x)
+        sverity=sverity+calsvty
+        datami=z_fault_tone_list(element,brg,straxis, rFAm.sord3x, rFAm.sval3x, rFAm.aval3x,calsvty,rFAm.dsi3x,rFAm.bin3x, "Accelerometer Cal 2X",'Cal 2X', rFAm.ord3freq) 
+        z_flag_tone_as_found (element,brg,str, rFAm.ord2freq ,datami)
+      end
+
+
+    else
+      local ampthresh=tonumber(get_attribute_value("AMPTHRESH",element, 112))
+      if rFAm.sval1x>0 then 
+        dif1x=math.abs(rFAm.sval1x - ampthresh)
+      else
+        dif1x=0
+      end
+      if dif1x>3 then
+        local calsv = dif1x*10
+        conf=stanford_conf(conf,.3)
+        sverity=calsv
+        datami=z_fault_tone_list(element,brg,straxis, rFAm.sord1x, rFAm.sval1x, ampthresh,calsv,rFAm.dsi1x,rFAm.bin1x, "Accelerometer Cal 1X",'Cal 1X', rFAm.sfreq) 
+        z_flag_tone_as_found (element,brg,straxis, rFAm.ord1freq ,datami)
+      end
+    end
+    if sverity>0 then
+      local check,count = get_store_value("calsvrty")
+      if check==true then
+        count = count + sverity*smult
+      else
+        count = sverity*smult
+      end
+      put_store_value("calsvrty",count)
+      debugprint ("Cal Check rule fired",sverity,count,"AAAAAAAAAAAAAAAAAAAAAA")
+      assert2(1)
+      assert3(conf)
+      return true
+    end
+  else
+    --datami=z_fault_tone_list(element,brg,straxis, rFAm.sord1x, rFAm.sval1x, ampthresh,calsv,rFAm.dsi1x,rFAm.bin1x, "Coupling Misalignment - Angular",'1x(1X)', rFAm.sfreq) 
+    --z_flag_tone_as_found (element,brg,straxis, rFAm.ord1freq ,datami)
+    increment_store_counter( "calpt" )
+    local check,count = get_store_value("calsvrty")
+    if check==true then
+      count = count + 100
+    else
+      count = 100
+    end
+    put_store_value("calsvrty",count)
+    debugprint ("Cal Check rule fired",sverity,count,"AAAAAAAAAAAAAAAAAAAAAA")
+    assert2(1)
+    assert3(conf)
+    return true
+  end
+
+  debugprint ('Cal Check false')
+  return false
+end
+--
+function calcheckseverity () -- Calibration Check Severity
+  debugprint ("Cal Check severity started")
+
+  local check,count = get_store_value("calpt")
+  local check1,svrty = get_store_value("calsvrty")
+  svrty=svrty or 0
+  if check==true then
+    svrty= svrty/count*3 -- times 3 for scaling
+    if svrty>=0 then
+      debugprint ("-- Calculate Normalized Severity --",count,svrty,"Calibration Check")
+      assert2(svrty)
+      return true
+    end
+  end
+  debugprint ("Calibration Check severity FALSE")
+  return false
+end
+
